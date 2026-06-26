@@ -40,6 +40,7 @@ model StoreConfig {
   gold_rate_14k       Decimal  @default(0.00) @db.Decimal(10, 2)
   gold_rate_18k       Decimal  @default(0.00) @db.Decimal(10, 2)
   gold_rate_22k       Decimal  @default(0.00) @db.Decimal(10, 2)
+  gold_rate_24k       Decimal  @default(0.00) @db.Decimal(10, 2)
   silver_rate         Decimal  @default(0.00) @db.Decimal(10, 2)
   making_charge_gold  Decimal  @default(0.00) @db.Decimal(10, 2)
   making_charge_silver Decimal @default(0.00) @db.Decimal(10, 2)
@@ -60,18 +61,33 @@ model DiamondRate {
 }
 
 model VariantWeightConfig {
-  id              Int     @id @default(autoincrement())
-  shop            String  @db.VarChar(255)
-  sku             String  @db.VarChar(100)
-  variant_id      String  @unique @db.VarChar(255)
-  metal_type      String  @default("gold") @db.VarChar(20)
-  purity          String  @db.VarChar(10)
-  metal_weight    Decimal @db.Decimal(8, 3)
-  diamond_color   String? @db.VarChar(10)
-  diamond_clarity String? @db.VarChar(15)
-  diamond_carat   Decimal @default(0.000) @db.Decimal(6, 3)
+  id              Int                    @id @default(autoincrement())
+  shop            String                 @db.VarChar(255)
+  sku             String                 @db.VarChar(100)
+  variant_id      String                 @unique @db.VarChar(255)
+  metal_type      String                 @default("gold") @db.VarChar(20)
+  purity          String                 @db.VarChar(10)
+  metal_weight    Decimal                @db.Decimal(8, 3)
+  diamond_color   String?                @db.VarChar(10)
+  diamond_clarity String?                @db.VarChar(15)
+  diamond_carat   Decimal                @default(0.000) @db.Decimal(6, 3)
+  diamonds        VariantDiamondConfig[]
 
   @@index([sku, purity])
+}
+
+model VariantDiamondConfig {
+  id                Int                 @id @default(autoincrement())
+  variant_config_id Int
+  variant_config    VariantWeightConfig @relation(fields: [variant_config_id], references: [id], onDelete: Cascade)
+  diamond_type      String              @db.VarChar(50)
+  shape             String              @db.VarChar(50)
+  color             String              @db.VarChar(10)
+  clarity           String              @db.VarChar(15)
+  count             Int                 @default(1)
+  total_weight      Decimal             @db.Decimal(6, 3)
+
+  @@index([variant_config_id])
 }
 
 model SyncJob {
@@ -88,3 +104,42 @@ model SyncJob {
 
   @@index([shop])
 }
+
+model ProductSizeWeightRule {
+  id                        Int      @id @default(autoincrement())
+  shop_id                   String   @db.VarChar(255)
+  product_id                String   @unique @db.VarChar(255)
+  enabled                   Boolean  @default(false)
+  base_size_start           Decimal  @db.Decimal(5, 2)
+  base_size_end             Decimal  @db.Decimal(5, 2)
+  base_gold_weight          Decimal  @db.Decimal(8, 3)
+  base_gold_weight_9k       Decimal? @db.Decimal(8, 3)
+  base_gold_weight_14k      Decimal? @db.Decimal(8, 3)
+  base_gold_weight_18k      Decimal? @db.Decimal(8, 3)
+  base_gold_weight_22k      Decimal? @db.Decimal(8, 3)
+  base_gold_weight_24k      Decimal? @db.Decimal(8, 3)
+  increment_weight_per_size Decimal  @db.Decimal(8, 3)
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
+
+  @@index([shop_id])
+  @@index([product_id])
+  @@map("product_size_weight_rules")
+}
+
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  shop        String   @db.VarChar(255)
+  type        String   @db.VarChar(50)   // "webhook", "background_job", "foreground_job"
+  name        String   @db.VarChar(100)  // e.g. "products/update", "runBackgroundSync", "syncProductVariantPrices"
+  status      String   @db.VarChar(20)   // "pending", "running", "success", "failed"
+  request     String?  @db.LongText      // JSON request payload
+  response    String?  @db.LongText      // JSON response payload or error string
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  @@index([shop, type, status])
+  @@map("audit_logs")
+}
+
+

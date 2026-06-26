@@ -79,15 +79,15 @@ export const action = async ({ request }) => {
       return {
         color: color ? String(color).trim().toUpperCase() : null,
         clarity: clarity ? String(clarity).trim().toUpperCase() : null,
-        size: size !== undefined ? Number(size) : NaN,
+        size: size !== undefined && size !== null && size !== "" && !isNaN(Number(size)) ? Number(size) : 0.0,
         price: price !== undefined ? Number(price) : NaN
       };
-    }).filter(r => r.color && r.clarity && !isNaN(r.size) && !isNaN(r.price));
+    }).filter(r => r.color && r.clarity && !isNaN(r.price));
 
     if (records.length === 0) {
       return { 
         success: false, 
-        error: "Missing required columns or no valid records. Please ensure your file has Color, Clarity, Size, and Price columns." 
+        error: "Missing required columns or no valid records. Please ensure your file has Color, Clarity, and Price columns." 
       };
     }
 
@@ -126,7 +126,7 @@ export const action = async ({ request }) => {
 
     return { 
       success: true, 
-      message: `Successfully uploaded ${createData.length} diamond rate mappings across ${uniqueSizes.length} size tiers!` 
+      message: `Successfully uploaded ${createData.length} diamond rate mappings!` 
     };
 
   } catch (err) {
@@ -152,9 +152,13 @@ export default function DiamondRates() {
   }, [actionData, shopify]);
 
   return (
-    <s-page heading="Diamond Pricing Matrix">
+    <s-page heading="Diamond Pricing Matrix" inline-size="large">
       {/* Premium UI/UX styling for layout, table spacing, and cards */}
       <style>{`
+        s-page {
+          --pc-page-max-width: 100% !important;
+          max-width: 100% !important;
+        }
         .layout-grid {
           display: grid;
           grid-template-columns: 2fr 1fr;
@@ -236,7 +240,6 @@ export default function DiamondRates() {
                     <tr>
                       <th>Color</th>
                       <th>Clarity</th>
-                      <th>Carat Range</th>
                       <th>Price Per Carat (₹)</th>
                     </tr>
                   </thead>
@@ -245,9 +248,6 @@ export default function DiamondRates() {
                       <tr key={rate.id}>
                         <td>{rate.color}</td>
                         <td>{rate.clarity}</td>
-                        <td>
-                          {Number(rate.size_min).toFixed(3)} - {Number(rate.size_max).toFixed(3)} ct
-                        </td>
                         <td><strong>₹{Number(rate.price_per_carat).toLocaleString()}</strong></td>
                       </tr>
                     ))}
@@ -271,7 +271,7 @@ export default function DiamondRates() {
               Upload an Excel (.xlsx) or CSV file with your diamond pricing matrix.
             </p>
             <p style={{ margin: "0 0 16px 0", fontSize: "13px", color: "#6d7175" }}>
-              <strong>Required columns:</strong> <code>Color</code>, <code>Clarity</code>, <code>Size</code>, and <code>Price</code>.
+              <strong>Required columns:</strong> <code>Color</code>, <code>Clarity</code>, and <code>Price</code> (<code>Size</code> is optional).
             </p>
             <p style={{ margin: "0 0 16px 0", fontSize: "13px" }}>
               <a 

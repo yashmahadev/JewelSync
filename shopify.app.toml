@@ -44,9 +44,7 @@ api_version = "2026-07"
   uri = "/webhooks/app/scopes_update"
   topics = [ "app/scopes_update" ]
 
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/products/update"
-  topics = [ "products/update" ]
+
 
 [auth]
 redirect_urls = [ "https://stallion-inviting-gnu.ngrok-free.app/auth/callback" ]

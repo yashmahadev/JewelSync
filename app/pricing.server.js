@@ -1,5 +1,64 @@
 import prisma from "./db.server";
 import { unauthenticated } from "./shopify.server";
+import { createAuditLog, updateAuditLog } from "./audit.server";
+
+/**
+ * Helper to call Shopify GraphQL with exponential backoff retry for throttling.
+ */
+async function callGraphQLWithRetry(graphqlClient, query, variables, retries = 5, delay = 1000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await graphqlClient(query, variables);
+
+      // Clone response to check status and check for GraphQL throttled error safely
+      let clonedResponse = response;
+      if (typeof response.clone === "function") {
+        clonedResponse = response.clone();
+      }
+
+      if (clonedResponse.status === 429 || clonedResponse.status === 430) {
+        console.warn(`[Shopify API] Throttled (HTTP ${clonedResponse.status}). Retrying attempt ${attempt}/${retries} after ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay *= 2.5; // exponential backoff with factor of 2.5
+        continue;
+      }
+
+      const resJson = await clonedResponse.json();
+      if (resJson.errors && resJson.errors.length > 0) {
+        const isThrottled = resJson.errors.some(e => 
+          e.message?.toLowerCase().includes("throttled") || 
+          e.message?.toLowerCase().includes("throttle") ||
+          e.message?.toLowerCase().includes("cost limit") ||
+          e.message?.toLowerCase().includes("rate limit")
+        );
+        if (isThrottled) {
+          console.warn(`[Shopify API] Throttled (GraphQL Error). Retrying attempt ${attempt}/${retries} after ${delay}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          delay *= 2.5;
+          continue;
+        }
+      }
+
+      return response;
+    } catch (err) {
+      const errMsg = err.message || "";
+      const isThrottled = errMsg.toLowerCase().includes("throttled") || 
+                          errMsg.toLowerCase().includes("throttle") || 
+                          errMsg.toLowerCase().includes("429") ||
+                          errMsg.toLowerCase().includes("rate limit");
+      
+      if (isThrottled && attempt < retries) {
+        console.warn(`[Shopify API] Caught Throttled error: "${errMsg}". Retrying attempt ${attempt}/${retries} after ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay *= 2.5;
+        continue;
+      }
+      
+      throw err;
+    }
+  }
+  throw new Error("Shopify GraphQL request failed after maximum retries due to throttling.");
+}
 
 /**
  * Calculates the final price of a jewelry item variant.
@@ -12,7 +71,7 @@ import { unauthenticated } from "./shopify.server";
  *   GST = Subtotal * GST_Percentage / 100
  *   Final Price = Subtotal + GST
  */
-export async function calculatePrice(shop, variant) {
+export async function calculatePrice(shop, variant, productInfo = {}) {
   // 1. Fetch store configurations
   const config = await prisma.storeConfig.findUnique({
     where: { shop },
@@ -22,9 +81,81 @@ export async function calculatePrice(shop, variant) {
     throw new Error(`Store configuration not found for shop: ${shop}`);
   }
 
-  // 2. Calculate Metal Cost
+  // 2. Fetch size weight rule if enabled and applicable
+  let baseWeight = Number(variant.metal_weight);
+  let adjustedWeight = baseWeight;
+  let weightAdded = 0;
+  let selectedSize = null;
+
+  const productTypeLower = (productInfo.productType || "").toLowerCase();
+  const isExcludedType =
+    productTypeLower.includes("chain") ||
+    productTypeLower.includes("bracelet") ||
+    productTypeLower.includes("earring") ||
+    productTypeLower.includes("pendant");
+
+  const sizeOption = (productInfo.selectedOptions || []).find((opt) => {
+    const name = opt.name.toLowerCase();
+    return name === "size" || name === "ring size" || name.includes("size");
+  });
+
+  let sizeWeightRule = null;
+  if (productInfo.productId) {
+    sizeWeightRule = await prisma.productSizeWeightRule.findUnique({
+      where: { product_id: productInfo.productId },
+    });
+  }
+
+  if (
+    variant.metal_type === "gold" &&
+    !isExcludedType &&
+    sizeOption &&
+    sizeWeightRule &&
+    sizeWeightRule.enabled
+  ) {
+    // Extract size
+    const match = sizeOption.value.match(/(\d+(\.\d+)?)/);
+    if (match) {
+      selectedSize = parseFloat(match[1]);
+    }
+
+    if (selectedSize !== null) {
+      const baseSizeEnd = Number(sizeWeightRule.base_size_end);
+      let baseGoldWeight = Number(sizeWeightRule.base_gold_weight);
+      const purityLower = (variant.purity || "").toLowerCase();
+      if ((purityLower.includes("9k") || purityLower.includes("9kt")) && sizeWeightRule.base_gold_weight_9k !== null && Number(sizeWeightRule.base_gold_weight_9k) > 0) {
+        baseGoldWeight = Number(sizeWeightRule.base_gold_weight_9k);
+      } else if ((purityLower.includes("14k") || purityLower.includes("14kt")) && sizeWeightRule.base_gold_weight_14k !== null && Number(sizeWeightRule.base_gold_weight_14k) > 0) {
+        baseGoldWeight = Number(sizeWeightRule.base_gold_weight_14k);
+      } else if ((purityLower.includes("18k") || purityLower.includes("18kt")) && sizeWeightRule.base_gold_weight_18k !== null && Number(sizeWeightRule.base_gold_weight_18k) > 0) {
+        baseGoldWeight = Number(sizeWeightRule.base_gold_weight_18k);
+      } else if ((purityLower.includes("22k") || purityLower.includes("22kt")) && sizeWeightRule.base_gold_weight_22k !== null && Number(sizeWeightRule.base_gold_weight_22k) > 0) {
+        baseGoldWeight = Number(sizeWeightRule.base_gold_weight_22k);
+      } else if ((purityLower.includes("24k") || purityLower.includes("24kt")) && sizeWeightRule.base_gold_weight_24k !== null && Number(sizeWeightRule.base_gold_weight_24k) > 0) {
+        baseGoldWeight = Number(sizeWeightRule.base_gold_weight_24k);
+      }
+      
+      const incrementWeightPerSize = Number(sizeWeightRule.increment_weight_per_size);
+
+      baseWeight = baseGoldWeight;
+
+      if (selectedSize <= baseSizeEnd) {
+        adjustedWeight = baseGoldWeight;
+      } else {
+        adjustedWeight = baseGoldWeight + ((selectedSize - baseSizeEnd) * incrementWeightPerSize);
+      }
+      weightAdded = Number((adjustedWeight - baseGoldWeight).toFixed(3));
+    }
+  } else if (sizeOption) {
+    // If not gold or rule not enabled, still extract size for API response metadata
+    const match = sizeOption.value.match(/(\d+(\.\d+)?)/);
+    if (match) {
+      selectedSize = parseFloat(match[1]);
+    }
+  }
+
+  // 3. Calculate Metal Cost using adjustedWeight
   let metalCost = 0;
-  const weight = Number(variant.metal_weight);
 
   if (variant.metal_type === "gold") {
     let rate = 0;
@@ -38,53 +169,332 @@ export async function calculatePrice(shop, variant) {
       rate = Number(config.gold_rate_18k);
     } else if (purity.includes("22k") || purity.includes("22kt")) {
       rate = Number(config.gold_rate_22k);
+    } else if (purity.includes("24k") || purity.includes("24kt")) {
+      rate = Number(config.gold_rate_24k);
     } else {
-      // Fallback if purity isn't explicitly matched
       rate = Number(config.gold_rate_18k);
     }
-    metalCost = weight * rate;
+    metalCost = adjustedWeight * rate;
   } else if (variant.metal_type === "silver") {
-    metalCost = weight * Number(config.silver_rate);
+    metalCost = adjustedWeight * Number(config.silver_rate);
   }
 
-  // 3. Calculate Making Charges
+  // 4. Calculate Making Charges using adjustedWeight
   let makingCharge = 0;
   if (variant.metal_type === "gold") {
-    makingCharge = weight * Number(config.making_charge_gold);
+    makingCharge = adjustedWeight * Number(config.making_charge_gold);
   } else if (variant.metal_type === "silver") {
-    makingCharge = weight * Number(config.making_charge_silver);
+    makingCharge = adjustedWeight * Number(config.making_charge_silver);
   }
 
-  // 4. Calculate Diamond Cost
-  let diamondCost = 0;
-  const carat = Number(variant.diamond_carat);
+  // 5. Fetch associated diamonds (dynamic diamond rows)
+  let diamonds = variant.diamonds;
+  if (!diamonds) {
+    diamonds = await prisma.variantDiamondConfig.findMany({
+      where: { variant_config_id: variant.id },
+    });
+  }
 
-  if (carat > 0 && variant.diamond_color && variant.diamond_clarity) {
-    // Look up the diamond rate based on Color, Clarity, and Carat Size
-    const match = await prisma.diamondRate.findFirst({
-      where: {
-        shop,
+  // Fallback for backward compatibility
+  if (
+    (!diamonds || diamonds.length === 0) &&
+    Number(variant.diamond_carat) > 0 &&
+    variant.diamond_color &&
+    variant.diamond_clarity
+  ) {
+    diamonds = [
+      {
+        diamond_type: "Diamonds",
+        shape: "Round",
         color: variant.diamond_color,
         clarity: variant.diamond_clarity,
-        size_min: { lte: carat },
-        size_max: { gte: carat },
+        count: 1,
+        total_weight: variant.diamond_carat,
       },
-    });
+    ];
+  }
 
-    if (match) {
-      const pricePerCarat = Number(match.price_per_carat);
-      diamondCost = carat * pricePerCarat;
+  // Calculate Diamond Cost
+  let diamondCost = 0;
+  let totalDiamondCarats = 0;
+  const diamondDetails = [];
+
+  if (diamonds && diamonds.length > 0) {
+    for (const d of diamonds) {
+      const count = Number(d.count || 1);
+      const totalWeight = Number(d.total_weight || 0);
+      totalDiamondCarats += totalWeight;
+
+      let rowCost = 0;
+      let pricePerCarat = 0;
+
+      if (totalWeight > 0 && d.color && d.clarity) {
+        const individualCarat = totalWeight / count;
+
+        const match = await prisma.diamondRate.findFirst({
+          where: {
+            shop,
+            color: d.color,
+            clarity: d.clarity,
+          },
+        });
+
+        if (match) {
+          pricePerCarat = Number(match.price_per_carat);
+          rowCost = totalWeight * pricePerCarat;
+          diamondCost += rowCost;
+        } else {
+          console.warn(
+            `No diamond price match found for color ${d.color}, clarity ${d.clarity}, size ${individualCarat.toFixed(4)}`
+          );
+        }
+      }
+
+      diamondDetails.push({
+        type: d.diamond_type || "Diamonds",
+        shape: d.shape || "Round",
+        color: d.color || "",
+        clarity: d.clarity || "",
+        count,
+        total_weight: totalWeight,
+        price_per_carat: pricePerCarat,
+        price: Math.round(rowCost),
+      });
+    }
+  }
+
+  // 6. Total calculations
+  const subtotal = metalCost + makingCharge + diamondCost;
+  const gst = subtotal * (Number(config.gst_percentage) / 100);
+  const finalPrice = Math.round(subtotal + gst);
+
+  // 7. Construct dynamic title and description labels
+  let metalColor = "Yellow Gold";
+  const options = productInfo.selectedOptions || [];
+  for (const opt of options) {
+    const val = opt.value.toLowerCase();
+    if (val.includes("white")) metalColor = "White Gold";
+    else if (val.includes("rose")) metalColor = "Rose Gold";
+    else if (val.includes("yellow")) metalColor = "Yellow Gold";
+    else if (val.includes("platinum")) metalColor = "Platinum";
+    else if (val.includes("silver")) metalColor = "Silver";
+  }
+
+  const purityStr = variant.purity ? variant.purity.toUpperCase().replace("K", "KT") : "18KT";
+  const goldTitle = variant.metal_type === "silver" ? "Sterling Silver" : `${purityStr} ${metalColor}`;
+  
+  const titleLower = (productInfo.title || "").toLowerCase();
+  const diamondTitle = titleLower.includes("natural") 
+    ? "Natural Brilliance Diamonds" 
+    : "Lab Grown CVD Type IIA Diamonds";
+
+  const variantInfo = variant.metal_type === "silver"
+    ? `This piece features sterling silver with elegant everyday shine.`
+    : `This piece features ${purityStr} gold with elegant everyday shine.`;
+
+  // 8. Build variant metafield array
+  const metafields = [
+    {
+      namespace: "custom",
+      key: "metal_type",
+      value: variant.metal_type || "gold",
+      type: "single_line_text_field",
+    },
+    {
+      namespace: "custom",
+      key: "purity",
+      value: variant.purity || "18K",
+      type: "single_line_text_field",
+    },
+    {
+      namespace: "custom",
+      key: "metal_weight",
+      value: Number(variant.metal_weight || 0).toFixed(3),
+      type: "number_decimal",
+    },
+    {
+      namespace: "custom",
+      key: "total_price",
+      value: finalPrice.toString(),
+      type: "number_integer",
+    },
+    {
+      namespace: "custom",
+      key: "gst",
+      value: gst.toFixed(2),
+      type: "number_decimal",
+    },
+    {
+      namespace: "custom",
+      key: "making_charges",
+      value: makingCharge.toFixed(2),
+      type: "number_decimal",
+    },
+    {
+      namespace: "custom",
+      key: "diamond_price",
+      value: diamondCost.toFixed(2),
+      type: "number_decimal",
+    },
+    {
+      namespace: "custom",
+      key: "gold_price",
+      value: (variant.metal_type === "gold" ? metalCost : 0).toFixed(2),
+      type: "number_decimal",
+    },
+    {
+      namespace: "custom",
+      key: "diamond_weight",
+      value: `${totalDiamondCarats.toFixed(2)} Ct.`,
+      type: "single_line_text_field",
+    },
+    {
+      namespace: "custom",
+      key: "gold_weight",
+      value: `${baseWeight.toFixed(2)} Grams`,
+      type: "single_line_text_field",
+    },
+    {
+      namespace: "custom",
+      key: "total_weight",
+      value: `${(adjustedWeight + totalDiamondCarats * 0.2).toFixed(3)} Grams`,
+      type: "single_line_text_field",
+    },
+    {
+      namespace: "custom",
+      key: "gold_title",
+      value: goldTitle,
+      type: "single_line_text_field",
+    },
+    {
+      namespace: "custom",
+      key: "diamond_title",
+      value: diamondTitle,
+      type: "single_line_text_field",
+    },
+    {
+      namespace: "custom",
+      key: "variant_info",
+      value: variantInfo,
+      type: "single_line_text_field",
+    },
+    {
+      namespace: "custom",
+      key: "gold_label",
+      value: goldTitle,
+      type: "single_line_text_field",
+    },
+    {
+      namespace: "custom",
+      key: "diamond_label",
+      value: `Diamonds (${totalDiamondCarats.toFixed(2)} Ct)`,
+      type: "single_line_text_field",
+    },
+    {
+      namespace: "custom",
+      key: "making_label",
+      value: "Making Charges",
+      type: "single_line_text_field",
+    },
+    {
+      namespace: "custom",
+      key: "gst_label",
+      value: `GST (${Number(config.gst_percentage)}%)`,
+      type: "single_line_text_field",
+    },
+    {
+      namespace: "custom",
+      key: "diamond_details",
+      value: JSON.stringify(diamondDetails),
+      type: "json",
+    },
+  ];
+
+  // Old flat metafield values for compatibility
+  metafields.push({
+    namespace: "custom",
+    key: "diamond_carat",
+    value: totalDiamondCarats.toFixed(3),
+    type: "number_decimal",
+  });
+  if (diamonds[0]?.color) {
+    metafields.push({
+      namespace: "custom",
+      key: "diamond_color",
+      value: diamonds[0].color,
+      type: "single_line_text_field",
+    });
+  }
+  if (diamonds[0]?.clarity) {
+    metafields.push({
+      namespace: "custom",
+      key: "diamond_clarity",
+      value: diamonds[0].clarity,
+      type: "single_line_text_field",
+    });
+  }
+
+  // Add row-specific metafields for the first 3 rows
+  for (let i = 0; i < 3; i++) {
+    const rowNum = i + 1;
+    if (i < diamondDetails.length) {
+      const d = diamondDetails[i];
+      const shapeDisplay = `${d.shape} ${d.color} - ${d.clarity}`;
+      metafields.push(
+        {
+          namespace: "custom",
+          key: `diamond_row_${rowNum}_type`,
+          value: d.type || "Diamonds",
+          type: "single_line_text_field",
+        },
+        {
+          namespace: "custom",
+          key: `diamond_row_${rowNum}_shape`,
+          value: shapeDisplay,
+          type: "single_line_text_field",
+        },
+        {
+          namespace: "custom",
+          key: `diamond_row_${rowNum}_count`,
+          value: Number(d.count || 1).toString(),
+          type: "number_integer",
+        },
+        {
+          namespace: "custom",
+          key: `diamond_row_${rowNum}_total_wt`,
+          value: Number(d.total_weight || 0).toFixed(2),
+          type: "number_decimal",
+        },
+      );
     } else {
-      console.warn(
-        `No diamond price match found for: ${variant.diamond_color} / ${variant.diamond_clarity} / ${carat}ct`
+      metafields.push(
+        {
+          namespace: "custom",
+          key: `diamond_row_${rowNum}_type`,
+          value: "",
+          type: "single_line_text_field",
+        },
+        {
+          namespace: "custom",
+          key: `diamond_row_${rowNum}_shape`,
+          value: "",
+          type: "single_line_text_field",
+        },
+        {
+          namespace: "custom",
+          key: `diamond_row_${rowNum}_count`,
+          value: "0",
+          type: "number_integer",
+        },
+        {
+          namespace: "custom",
+          key: `diamond_row_${rowNum}_total_wt`,
+          value: "0.00",
+          type: "number_decimal",
+        },
       );
     }
   }
-
-  // 5. Total calculations
-  const subtotal = metalCost + makingCharge + diamondCost;
-  const gst = subtotal * (Number(config.gst_percentage) / 100);
-  const finalPrice = Math.round(subtotal + gst); // Rounding off to nearest integer
 
   return {
     metalCost,
@@ -92,6 +502,14 @@ export async function calculatePrice(shop, variant) {
     diamondCost,
     gst,
     finalPrice,
+    baseWeight,
+    selectedSize,
+    adjustedWeight,
+    weightAdded,
+    goldPrice: variant.metal_type === "gold" ? metalCost : 0,
+    metafields,
+    diamondDetails,
+    totalDiamondCarats,
   };
 }
 
@@ -122,6 +540,118 @@ export async function ensureMetafieldDefinitions(graphqlClient) {
       ownerType: "PRODUCTVARIANT",
     },
     {
+      name: "Total Price",
+      namespace: "custom",
+      key: "total_price",
+      type: "number_integer",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "GST Amount",
+      namespace: "custom",
+      key: "gst",
+      type: "number_decimal",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Making Charges",
+      namespace: "custom",
+      key: "making_charges",
+      type: "number_decimal",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Price",
+      namespace: "custom",
+      key: "diamond_price",
+      type: "number_decimal",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Gold Price",
+      namespace: "custom",
+      key: "gold_price",
+      type: "number_decimal",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Total Weight",
+      namespace: "custom",
+      key: "total_weight",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Gold Weight Text",
+      namespace: "custom",
+      key: "gold_weight",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Weight Text",
+      namespace: "custom",
+      key: "diamond_weight",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Gold Title",
+      namespace: "custom",
+      key: "gold_title",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Title",
+      namespace: "custom",
+      key: "diamond_title",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Variant Info",
+      namespace: "custom",
+      key: "variant_info",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Gold Label",
+      namespace: "custom",
+      key: "gold_label",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Label",
+      namespace: "custom",
+      key: "diamond_label",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Making Label",
+      namespace: "custom",
+      key: "making_label",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "GST Label",
+      namespace: "custom",
+      key: "gst_label",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Details JSON",
+      namespace: "custom",
+      key: "diamond_details",
+      type: "json",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
       name: "Diamond Carat (ct)",
       namespace: "custom",
       key: "diamond_carat",
@@ -142,11 +672,96 @@ export async function ensureMetafieldDefinitions(graphqlClient) {
       type: "single_line_text_field",
       ownerType: "PRODUCTVARIANT",
     },
+    {
+      name: "Diamond Row 1 Type",
+      namespace: "custom",
+      key: "diamond_row_1_type",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Row 1 Shape",
+      namespace: "custom",
+      key: "diamond_row_1_shape",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Row 1 Count",
+      namespace: "custom",
+      key: "diamond_row_1_count",
+      type: "number_integer",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Row 1 Total Wt",
+      namespace: "custom",
+      key: "diamond_row_1_total_wt",
+      type: "number_decimal",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Row 2 Type",
+      namespace: "custom",
+      key: "diamond_row_2_type",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Row 2 Shape",
+      namespace: "custom",
+      key: "diamond_row_2_shape",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Row 2 Count",
+      namespace: "custom",
+      key: "diamond_row_2_count",
+      type: "number_integer",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Row 2 Total Wt",
+      namespace: "custom",
+      key: "diamond_row_2_total_wt",
+      type: "number_decimal",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Row 3 Type",
+      namespace: "custom",
+      key: "diamond_row_3_type",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Row 3 Shape",
+      namespace: "custom",
+      key: "diamond_row_3_shape",
+      type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Row 3 Count",
+      namespace: "custom",
+      key: "diamond_row_3_count",
+      type: "number_integer",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Diamond Row 3 Total Wt",
+      namespace: "custom",
+      key: "diamond_row_3_total_wt",
+      type: "number_decimal",
+      ownerType: "PRODUCTVARIANT",
+    },
   ];
 
   for (const def of definitions) {
     try {
-      const response = await graphqlClient(
+      const response = await callGraphQLWithRetry(
+        graphqlClient,
         `#graphql
         mutation metafieldDefinitionCreate($definition: MetafieldDefinitionInput!) {
           metafieldDefinitionCreate(definition: $definition) {
@@ -183,28 +798,29 @@ export async function ensureMetafieldDefinitions(graphqlClient) {
   }
 }
 
-/**
- * Recalculates and syncs prices for all variants of a shop to Shopify.
- */
 export async function syncAllVariantPrices(shop, graphqlClient) {
+  const logId = await createAuditLog(shop, "foreground_job", "syncAllVariantPrices", {});
+  try {
   // Ensure metafield definitions exist on variant owner
   await ensureMetafieldDefinitions(graphqlClient);
 
-  // Fetch all configured variants for this store
+  // Fetch all configured variants for this store, including diamonds
   const variants = await prisma.variantWeightConfig.findMany({
     where: { shop },
+    include: { diamonds: true },
   });
 
   console.log(`Recalculating prices for ${variants.length} variants on shop ${shop}`);
 
-  // 1. Fetch all products and their variants to build a variantId -> productId mapping
+  // 1. Fetch all products and their variants to build a variantId -> productInfo mapping
   const productMapping = {};
   try {
     let hasNextPage = true;
     let cursor = null;
 
     while (hasNextPage) {
-      const queryResponse = await graphqlClient(
+      const queryResponse = await callGraphQLWithRetry(
+        graphqlClient,
         `#graphql
         query getProductsWithVariants($cursor: String) {
           products(first: 50, after: $cursor) {
@@ -215,10 +831,16 @@ export async function syncAllVariantPrices(shop, graphqlClient) {
             edges {
               node {
                 id
-                variants(first: 100) {
+                title
+                productType
+                variants(first: 250) {
                   edges {
                     node {
                       id
+                      selectedOptions {
+                        name
+                        value
+                      }
                     }
                   }
                 }
@@ -235,10 +857,17 @@ export async function syncAllVariantPrices(shop, graphqlClient) {
       const productsEdges = queryData.data?.products?.edges || [];
       for (const productEdge of productsEdges) {
         const productId = productEdge.node.id;
+        const productTitle = productEdge.node.title;
+        const productType = productEdge.node.productType;
         const variantEdges = productEdge.node.variants.edges || [];
         for (const variantEdge of variantEdges) {
           const variantId = variantEdge.node.id;
-          productMapping[variantId] = productId;
+          productMapping[variantId] = {
+            productId,
+            productType,
+            title: productTitle,
+            selectedOptions: variantEdge.node.selectedOptions,
+          };
         }
       }
 
@@ -257,61 +886,18 @@ export async function syncAllVariantPrices(shop, graphqlClient) {
 
   for (const variant of variants) {
     const variantId = variant.variant_id;
-    const productId = productMapping[variantId];
-    if (!productId) {
+    const mappedInfo = productMapping[variantId];
+    if (!mappedInfo) {
       console.warn(`Variant ${variantId} (SKU: ${variant.sku}) not found on Shopify, skipping sync.`);
       results.push({ sku: variant.sku, success: false, error: "Variant not found on Shopify" });
       continue;
     }
 
+    const productId = mappedInfo.productId;
+
     try {
-      const { finalPrice } = await calculatePrice(shop, variant);
+      const { finalPrice, metafields } = await calculatePrice(shop, variant, mappedInfo);
       
-      // Build metafields array for the variant
-      const metafields = [
-        {
-          namespace: "custom",
-          key: "metal_type",
-          value: variant.metal_type || "gold",
-          type: "single_line_text_field",
-        },
-        {
-          namespace: "custom",
-          key: "purity",
-          value: variant.purity || "18K",
-          type: "single_line_text_field",
-        },
-        {
-          namespace: "custom",
-          key: "metal_weight",
-          value: Number(variant.metal_weight || 0).toFixed(3),
-          type: "number_decimal",
-        },
-      ];
-
-      metafields.push({
-        namespace: "custom",
-        key: "diamond_carat",
-        value: Number(variant.diamond_carat || 0).toFixed(3),
-        type: "number_decimal",
-      });
-      if (variant.diamond_color) {
-        metafields.push({
-          namespace: "custom",
-          key: "diamond_color",
-          value: variant.diamond_color,
-          type: "single_line_text_field",
-        });
-      }
-      if (variant.diamond_clarity) {
-        metafields.push({
-          namespace: "custom",
-          key: "diamond_clarity",
-          value: variant.diamond_clarity,
-          type: "single_line_text_field",
-        });
-      }
-
       if (!updatesByProduct[productId]) {
         updatesByProduct[productId] = [];
       }
@@ -330,40 +916,62 @@ export async function syncAllVariantPrices(shop, graphqlClient) {
   // 3. Execute bulk update per product
   for (const [productId, variantUpdates] of Object.entries(updatesByProduct)) {
     try {
-      const response = await graphqlClient(
-        `#graphql
-        mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-          productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-            productVariants {
-              id
-              price
+      const CHUNK_SIZE = 2;
+      let allUpdatedVariants = [];
+      let hasError = false;
+      let errorMessage = "";
+
+      for (let i = 0; i < variantUpdates.length; i += CHUNK_SIZE) {
+        const chunk = variantUpdates.slice(i, i + CHUNK_SIZE);
+        const response = await callGraphQLWithRetry(
+          graphqlClient,
+          `#graphql
+          mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+            productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+              productVariants {
+                id
+                price
+              }
+              userErrors {
+                field
+                message
+              }
             }
-            userErrors {
-              field
-              message
-            }
+          }`,
+          {
+            variables: {
+              productId,
+              variants: chunk,
+            },
           }
-        }`,
-        {
-          variables: {
-            productId,
-            variants: variantUpdates,
-          },
+        );
+
+        const resData = await response.json();
+        const errors = resData.data?.productVariantsBulkUpdate?.userErrors || [];
+
+        if (errors.length > 0) {
+          console.error(`Shopify bulk update error for product ${productId}:`, errors);
+          hasError = true;
+          errorMessage = errors[0].message;
+          break;
+        } else {
+          const updated = resData.data?.productVariantsBulkUpdate?.productVariants || [];
+          allUpdatedVariants = allUpdatedVariants.concat(updated);
         }
-      );
 
-      const resData = await response.json();
-      const errors = resData.data?.productVariantsBulkUpdate?.userErrors || [];
+        // Delay to avoid Shopify database locks on sequential updates
+        if (i + CHUNK_SIZE < variantUpdates.length) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
+      }
 
-      if (errors.length > 0) {
-        console.error(`Shopify bulk update error for product ${productId}:`, errors);
+      if (hasError) {
         for (const update of variantUpdates) {
           const sku = skuMap[update.id] || update.id;
-          results.push({ sku, success: false, error: errors[0].message });
+          results.push({ sku, success: false, error: errorMessage });
         }
       } else {
-        const updatedVariants = resData.data?.productVariantsBulkUpdate?.productVariants || [];
-        const updatedIds = new Set(updatedVariants.map((v) => v.id));
+        const updatedIds = new Set(allUpdatedVariants.map((v) => v.id));
         for (const update of variantUpdates) {
           const sku = skuMap[update.id] || update.id;
           if (updatedIds.has(update.id)) {
@@ -382,7 +990,12 @@ export async function syncAllVariantPrices(shop, graphqlClient) {
     }
   }
 
+  await updateAuditLog(logId, "success", { message: "Successfully synced all variant prices", resultsCount: results.length });
   return results;
+  } catch (err) {
+    await updateAuditLog(logId, "failed", { error: err.message });
+    throw err;
+  }
 }
 
 /**
@@ -391,6 +1004,7 @@ export async function syncAllVariantPrices(shop, graphqlClient) {
  */
 export async function runBackgroundSync(shop, jobId) {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const logId = await createAuditLog(shop, "background_job", "runBackgroundSync", { jobId });
 
   let job = await prisma.syncJob.findUnique({ where: { id: jobId } });
   if (!job) {
@@ -435,7 +1049,8 @@ export async function runBackgroundSync(shop, jobId) {
     let fetchedPages = 0;
 
     while (hasNextPage) {
-      const queryResponse = await graphqlClient(
+      const queryResponse = await callGraphQLWithRetry(
+        graphqlClient,
         `#graphql
         query getProductsWithVariants($cursor: String) {
           products(first: 50, after: $cursor) {
@@ -446,7 +1061,9 @@ export async function runBackgroundSync(shop, jobId) {
             edges {
               node {
                 id
-                variants(first: 100) {
+                title
+                productType
+                variants(first: 250) {
                   edges {
                     node {
                       id
@@ -456,7 +1073,7 @@ export async function runBackgroundSync(shop, jobId) {
                         name
                         value
                       }
-                      metafields(first: 10) {
+                      metafields(first: 50) {
                         edges {
                           node {
                             namespace
@@ -481,10 +1098,17 @@ export async function runBackgroundSync(shop, jobId) {
       const productsEdges = queryData.data?.products?.edges || [];
       for (const productEdge of productsEdges) {
         const productId = productEdge.node.id;
+        const productTitle = productEdge.node.title;
+        const productType = productEdge.node.productType;
         const variantEdges = productEdge.node.variants.edges || [];
         for (const variantEdge of variantEdges) {
           const v = variantEdge.node;
-          productMapping[v.id] = productId;
+          productMapping[v.id] = {
+            productId,
+            productType,
+            title: productTitle,
+            selectedOptions: v.selectedOptions,
+          };
 
           // Check if variant has custom metafields configured on Shopify
           const mEdges = v.metafields?.edges || [];
@@ -531,9 +1155,10 @@ export async function runBackgroundSync(shop, jobId) {
       }
     }
 
-    // 4. Now load all variant configurations from database
+    // 4. Now load all variant configurations from database including diamonds
     const variants = await prisma.variantWeightConfig.findMany({
       where: { shop },
+      include: { diamonds: true },
     });
 
     if (variants.length === 0) {
@@ -557,8 +1182,8 @@ export async function runBackgroundSync(shop, jobId) {
 
     for (const variant of variants) {
       const variantId = variant.variant_id;
-      const productId = productMapping[variantId];
-      if (!productId) {
+      const mappedInfo = productMapping[variantId];
+      if (!mappedInfo) {
         skippedCount++;
         if (skippedCount <= 5) {
           skippedLog += `SKU ${variant.sku} not found on Shopify. `;
@@ -566,53 +1191,11 @@ export async function runBackgroundSync(shop, jobId) {
         continue;
       }
 
+      const productId = mappedInfo.productId;
+
       try {
-        const { finalPrice } = await calculatePrice(shop, variant);
+        const { finalPrice, metafields } = await calculatePrice(shop, variant, mappedInfo);
         
-        const metafields = [
-          {
-            namespace: "custom",
-            key: "metal_type",
-            value: variant.metal_type || "gold",
-            type: "single_line_text_field",
-          },
-          {
-            namespace: "custom",
-            key: "purity",
-            value: variant.purity || "18K",
-            type: "single_line_text_field",
-          },
-          {
-            namespace: "custom",
-            key: "metal_weight",
-            value: Number(variant.metal_weight || 0).toFixed(3),
-            type: "number_decimal",
-          },
-        ];
-
-        metafields.push({
-          namespace: "custom",
-          key: "diamond_carat",
-          value: Number(variant.diamond_carat || 0).toFixed(3),
-          type: "number_decimal",
-        });
-        if (variant.diamond_color) {
-          metafields.push({
-            namespace: "custom",
-            key: "diamond_color",
-            value: variant.diamond_color,
-            type: "single_line_text_field",
-          });
-        }
-        if (variant.diamond_clarity) {
-          metafields.push({
-            namespace: "custom",
-            key: "diamond_clarity",
-            value: variant.diamond_clarity,
-            type: "single_line_text_field",
-          });
-        }
-
         if (!updatesByProduct[productId]) {
           updatesByProduct[productId] = [];
         }
@@ -650,41 +1233,63 @@ export async function runBackgroundSync(shop, jobId) {
       let failCount = 0;
 
       try {
-        const response = await graphqlClient(
-          `#graphql
-          mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-            productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-              productVariants {
-                id
-                price
+        const CHUNK_SIZE = 2;
+        let allUpdatedVariants = [];
+        let hasError = false;
+        let errorMessage = "";
+
+        for (let j = 0; j < variantUpdates.length; j += CHUNK_SIZE) {
+          const chunk = variantUpdates.slice(j, j + CHUNK_SIZE);
+          const response = await callGraphQLWithRetry(
+            graphqlClient,
+            `#graphql
+            mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+              productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+                productVariants {
+                  id
+                  price
+                }
+                userErrors {
+                  field
+                  message
+                }
               }
-              userErrors {
-                field
-                message
-              }
+            }`,
+            {
+              variables: {
+                productId,
+                variants: chunk,
+              },
             }
-          }`,
-          {
-            variables: {
-              productId,
-              variants: variantUpdates,
-            },
+          );
+
+          const resData = await response.json();
+          const errors = resData.data?.productVariantsBulkUpdate?.userErrors || [];
+
+          if (errors.length > 0) {
+            console.error(`[BackgroundSync] Shopify error for product ${productId}:`, errors);
+            hasError = true;
+            errorMessage = errors[0].message;
+            break;
+          } else {
+            const updated = resData.data?.productVariantsBulkUpdate?.productVariants || [];
+            allUpdatedVariants = allUpdatedVariants.concat(updated);
           }
-        );
 
-        const resData = await response.json();
-        const errors = resData.data?.productVariantsBulkUpdate?.userErrors || [];
+          // Delay to avoid Shopify database locks on sequential updates
+          if (j + CHUNK_SIZE < variantUpdates.length) {
+            await new Promise((resolve) => setTimeout(resolve, 800));
+          }
+        }
 
-        if (errors.length > 0) {
-          console.error(`[BackgroundSync] Shopify error for product ${productId}:`, errors);
+        if (hasError) {
           failCount = variantUpdates.length;
-          const errSnippet = `Product ${productId} failed: ${errors[0].message}. `;
+          const errSnippet = `Product ${productId} failed: ${errorMessage}. `;
           if (currentErrors.length < 3000) {
             currentErrors += errSnippet;
           }
         } else {
-          const updatedVariants = resData.data?.productVariantsBulkUpdate?.productVariants || [];
-          const updatedIds = new Set(updatedVariants.map((v) => v.id));
+          const updatedIds = new Set(allUpdatedVariants.map((v) => v.id));
           
           for (const update of variantUpdates) {
             if (updatedIds.has(update.id)) {
@@ -733,9 +1338,11 @@ export async function runBackgroundSync(shop, jobId) {
     });
 
     console.log(`[BackgroundSync] Job ${jobId} completed successfully.`);
+    await updateAuditLog(logId, "success", { message: "Background sync completed successfully", total: totalVariantsToProcess });
 
   } catch (err) {
     console.error(`[BackgroundSync] Fatal error in job ${jobId}:`, err);
+    await updateAuditLog(logId, "failed", { error: err.message });
     try {
       await prisma.syncJob.update({
         where: { id: jobId },
@@ -750,23 +1357,30 @@ export async function runBackgroundSync(shop, jobId) {
   }
 }
 
-/**
- * Recalculates and syncs prices/metafields for a single product's variants to Shopify.
- */
 export async function syncProductVariantPrices(shop, productId, graphqlClient) {
+  const logId = await createAuditLog(shop, "foreground_job", "syncProductVariantPrices", { productId });
+  try {
   // Ensure metafield definitions exist
   await ensureMetafieldDefinitions(graphqlClient);
 
   // Fetch all variants of this product from Shopify
-  const response = await graphqlClient(
+  const response = await callGraphQLWithRetry(
+    graphqlClient,
     `#graphql
     query getProductVariants($id: ID!) {
       product(id: $id) {
-        variants(first: 100) {
+        id
+        title
+        productType
+        variants(first: 250) {
           edges {
             node {
               id
               sku
+              selectedOptions {
+                name
+                value
+              }
             }
           }
         }
@@ -786,17 +1400,24 @@ export async function syncProductVariantPrices(shop, productId, graphqlClient) {
   const variantEdges = product.variants.edges || [];
   const variantIds = variantEdges.map((edge) => edge.node.id);
 
-  // Fetch configs from database for these variants
+  // Fetch configs from database for these variants including diamonds
   const dbConfigs = await prisma.variantWeightConfig.findMany({
     where: {
       variant_id: { in: variantIds },
     },
+    include: { diamonds: true },
   });
 
   const dbConfigsMap = {};
   dbConfigs.forEach((c) => {
     dbConfigsMap[c.variant_id] = c;
   });
+
+  const productInfo = {
+    productId: product.id,
+    productType: product.productType,
+    title: product.title,
+  };
 
   const variantUpdates = [];
 
@@ -805,51 +1426,12 @@ export async function syncProductVariantPrices(shop, productId, graphqlClient) {
     const dbConfig = dbConfigsMap[v.id];
     if (!dbConfig) continue;
 
-    const { finalPrice } = await calculatePrice(shop, dbConfig);
+    const mappedInfo = {
+      ...productInfo,
+      selectedOptions: v.selectedOptions,
+    };
 
-    const metafields = [
-      {
-        namespace: "custom",
-        key: "metal_type",
-        value: dbConfig.metal_type || "gold",
-        type: "single_line_text_field",
-      },
-      {
-        namespace: "custom",
-        key: "purity",
-        value: dbConfig.purity || "18K",
-        type: "single_line_text_field",
-      },
-      {
-        namespace: "custom",
-        key: "metal_weight",
-        value: Number(dbConfig.metal_weight || 0).toFixed(3),
-        type: "number_decimal",
-      },
-    ];
-
-    metafields.push({
-      namespace: "custom",
-      key: "diamond_carat",
-      value: Number(dbConfig.diamond_carat || 0).toFixed(3),
-      type: "number_decimal",
-    });
-    if (dbConfig.diamond_color) {
-      metafields.push({
-        namespace: "custom",
-        key: "diamond_color",
-        value: dbConfig.diamond_color,
-        type: "single_line_text_field",
-      });
-    }
-    if (dbConfig.diamond_clarity) {
-      metafields.push({
-        namespace: "custom",
-        key: "diamond_clarity",
-        value: dbConfig.diamond_clarity,
-        type: "single_line_text_field",
-      });
-    }
+    const { finalPrice, metafields } = await calculatePrice(shop, dbConfig, mappedInfo);
 
     variantUpdates.push({
       id: v.id,
@@ -859,28 +1441,43 @@ export async function syncProductVariantPrices(shop, productId, graphqlClient) {
   }
 
   if (variantUpdates.length > 0) {
-    const updateResponse = await graphqlClient(
-      `#graphql
-      mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-          userErrors {
-            field
-            message
+    const CHUNK_SIZE = 2;
+    for (let i = 0; i < variantUpdates.length; i += CHUNK_SIZE) {
+      const chunk = variantUpdates.slice(i, i + CHUNK_SIZE);
+      const updateResponse = await callGraphQLWithRetry(
+        graphqlClient,
+        `#graphql
+        mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+          productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+            userErrors {
+              field
+              message
+            }
           }
+        }`,
+        {
+          variables: {
+            productId,
+            variants: chunk,
+          },
         }
-      }`,
-      {
-        variables: {
-          productId,
-          variants: variantUpdates,
-        },
+      );
+      const updateJson = await updateResponse.json();
+      const errors = updateJson.data?.productVariantsBulkUpdate?.userErrors || [];
+      if (errors.length > 0) {
+        throw new Error(errors[0].message);
       }
-    );
-    const updateJson = await updateResponse.json();
-    const errors = updateJson.data?.productVariantsBulkUpdate?.userErrors || [];
-    if (errors.length > 0) {
-      throw new Error(errors[0].message);
+      
+      // Delay to avoid Shopify database locks on sequential updates
+      if (i + CHUNK_SIZE < variantUpdates.length) {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
     }
+  }
+  await updateAuditLog(logId, "success", { message: "Single product sync completed successfully", updatedVariantsCount: variantUpdates.length });
+  } catch (err) {
+    await updateAuditLog(logId, "failed", { error: err.message });
+    throw err;
   }
 }
 

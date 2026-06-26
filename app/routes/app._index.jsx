@@ -103,7 +103,7 @@ export const action = async ({ request }) => {
               id
               title
               handle
-              variants(first: 50) {
+              variants(first: 250) {
                 edges {
                   node {
                     id
@@ -188,7 +188,7 @@ export const action = async ({ request }) => {
           const diamondColor = colors[Math.floor(Math.random() * colors.length)];
           const diamondClarity = clarities[Math.floor(Math.random() * clarities.length)];
 
-          await prisma.variantWeightConfig.upsert({
+          const dbConfig = await prisma.variantWeightConfig.upsert({
             where: { variant_id: variantId },
             update: {
               sku: variantSku,
@@ -211,6 +211,53 @@ export const action = async ({ request }) => {
               diamond_carat: diamondCarat,
             },
           });
+
+          // Delete old diamonds if any
+          await prisma.variantDiamondConfig.deleteMany({
+            where: { variant_config_id: dbConfig.id }
+          });
+
+          // Create Row 1 (Solitaire/Main stone)
+          const mainShape = product.sku === "CAD-237" ? "Oval" : "Round";
+          const mainType = product.sku === "CAD-237" ? "Solitaire" : "Accent Diamond";
+          
+          await prisma.variantDiamondConfig.create({
+            data: {
+              variant_config_id: dbConfig.id,
+              diamond_type: mainType,
+              shape: mainShape,
+              color: diamondColor,
+              clarity: diamondClarity,
+              count: 1,
+              total_weight: diamondCarat,
+            }
+          });
+
+          // Create Row 2 for specific product SKUs to demonstrate multiple diamond configs
+          if (product.sku === "CAD-237" || product.sku === "CAD-243" || product.sku === "CAD-246") {
+            const row2Weight = parseFloat((0.05 + Math.random() * 0.15).toFixed(3));
+            const row2Count = Math.floor(Math.random() * 12) + 4;
+            
+            await prisma.variantDiamondConfig.create({
+              data: {
+                variant_config_id: dbConfig.id,
+                diamond_type: "Small Diamond",
+                shape: "Round",
+                color: "EF",
+                clarity: "VVS-VS",
+                count: row2Count,
+                total_weight: row2Weight,
+              }
+            });
+
+            // Update the flat summary diamond carat on the parent configuration
+            await prisma.variantWeightConfig.update({
+              where: { id: dbConfig.id },
+              data: {
+                diamond_carat: diamondCarat + row2Weight
+              }
+            });
+          }
         }
 
         console.log(`✅ Created product: ${product.title} with ${variantInputs.length} variants and random specifications`);
@@ -254,8 +301,12 @@ export default function Index() {
   }, [result, shopify]);
 
   return (
-    <s-page heading="Welcome to JewelSync 💎">
+    <s-page heading="Welcome to JewelSync 💎" inline-size="large">
       <style>{`
+        s-page {
+          --pc-page-max-width: 100% !important;
+          max-width: 100% !important;
+        }
         .home-grid {
           display: grid;
           grid-template-columns: 2fr 1fr;
