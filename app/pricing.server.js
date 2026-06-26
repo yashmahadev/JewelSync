@@ -822,8 +822,8 @@ export async function syncAllVariantPrices(shop, graphqlClient) {
       const queryResponse = await callGraphQLWithRetry(
         graphqlClient,
         `#graphql
-        query getProductsWithVariants($cursor: String) {
-          products(first: 50, after: $cursor) {
+        query getProductsWithVariants($cursor: String, $query: String) {
+          products(first: 50, after: $cursor, query: $query) {
             pageInfo {
               hasNextPage
               endCursor
@@ -849,7 +849,7 @@ export async function syncAllVariantPrices(shop, graphqlClient) {
           }
         }`,
         {
-          variables: { cursor },
+          variables: { cursor, query: "status:active" },
         }
       );
 
@@ -1053,8 +1053,8 @@ export async function runBackgroundSync(shop, jobId) {
       const queryResponse = await callGraphQLWithRetry(
         graphqlClient,
         `#graphql
-        query getProductsWithVariants($cursor: String) {
-          products(first: 50, after: $cursor) {
+        query getProductsWithVariants($cursor: String, $query: String) {
+          products(first: 50, after: $cursor, query: $query) {
             pageInfo {
               hasNextPage
               endCursor
@@ -1091,7 +1091,7 @@ export async function runBackgroundSync(shop, jobId) {
           }
         }`,
         {
-          variables: { cursor },
+          variables: { cursor, query: "status:active" },
         }
       );
 
@@ -1215,7 +1215,7 @@ export async function runBackgroundSync(shop, jobId) {
     const totalVariantsToProcess = Object.values(updatesByProduct).reduce((sum, list) => sum + list.length, 0);
 
     // Update job metadata
-    let initialErrorMsg = skippedCount > 0 ? `Skipped ${skippedCount} variants not matching Shopify products. ` : "";
+    let initialErrorMsg = skippedCount > 0 ? `Skipped ${skippedCount} variants not matching Shopify products. Details: ${skippedLog}` : "";
     await prisma.syncJob.update({
       where: { id: jobId },
       data: {
@@ -1373,6 +1373,7 @@ export async function syncProductVariantPrices(shop, productId, graphqlClient) {
       product(id: $id) {
         id
         title
+        status
         productType
         variants(first: 250) {
           edges {
@@ -1397,6 +1398,12 @@ export async function syncProductVariantPrices(shop, productId, graphqlClient) {
   const product = resJson.data?.product;
   if (!product) {
     throw new Error(`Product ${productId} not found on Shopify.`);
+  }
+
+  if (product.status !== "ACTIVE") {
+    console.warn(`[syncProductVariantPrices] Product ${product.title} (ID: ${productId}) status is ${product.status}, skipping price sync.`);
+    await updateAuditLog(logId, "success", { message: "Skipped price sync because product is not ACTIVE", status: product.status });
+    return;
   }
 
   const variantEdges = product.variants.edges || [];
