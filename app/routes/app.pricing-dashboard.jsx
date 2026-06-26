@@ -162,7 +162,36 @@ export const loader = async ({ request }) => {
     const variants = product.variants.edges || [];
     for (const edge of variants) {
       const v = edge.node;
-      if (!serializedConfigsMap[v.id]) {
+      if (serializedConfigsMap[v.id]) {
+        const dbConfig = serializedConfigsMap[v.id];
+        let dbConfigUpdated = false;
+        const updateData = {};
+
+        if (hasOptionPurity(v)) {
+          const smartPurity = getSmartPurityFallback(v);
+          if (dbConfig.purity !== smartPurity) {
+            dbConfig.purity = smartPurity;
+            updateData.purity = smartPurity;
+            dbConfigUpdated = true;
+          }
+        }
+
+        if (hasOptionMetalType(v)) {
+          const smartMetalType = getSmartMetalTypeFallback(v);
+          if (dbConfig.metal_type !== smartMetalType) {
+            dbConfig.metal_type = smartMetalType;
+            updateData.metal_type = smartMetalType;
+            dbConfigUpdated = true;
+          }
+        }
+
+        if (dbConfigUpdated) {
+          await prisma.variantWeightConfig.update({
+            where: { id: dbConfig.id },
+            data: updateData,
+          });
+        }
+      } else {
         const mEdges = v.metafields?.edges || [];
         const mFields = {};
         mEdges.forEach((mEdge) => {
@@ -174,8 +203,8 @@ export const loader = async ({ request }) => {
         if (mFields.metal_weight !== undefined || mFields.metal_type !== undefined || mFields.purity !== undefined) {
           const weight = Number(mFields.metal_weight || 0);
           const dCarat = Number(mFields.diamond_carat || 0);
-          const metalType = mFields.metal_type || "gold";
-          const purity = mFields.purity || "18K";
+          const metalType = mFields.metal_type || getSmartMetalTypeFallback(v);
+          const purity = mFields.purity || getSmartPurityFallback(v);
           const dColor = mFields.diamond_color || "";
           const dClarity = mFields.diamond_clarity || "";
 
@@ -739,27 +768,7 @@ export default function PricingDashboard() {
     return () => clearInterval(interval);
   }, [isSyncActive, submit, searchVal]);
 
-  const getSmartMetalTypeFallback = (variant) => {
-    const options = variant.selectedOptions || [];
-    for (const opt of options) {
-      const val = opt.value.toLowerCase();
-      if (val.includes("silver")) return "silver";
-    }
-    return "gold";
-  };
 
-  const getSmartPurityFallback = (variant) => {
-    const options = variant.selectedOptions || [];
-    for (const opt of options) {
-      const val = opt.value.toLowerCase();
-      if (val.includes("9k") || val.includes("9kt")) return "9K";
-      if (val.includes("14k") || val.includes("14kt")) return "14K";
-      if (val.includes("18k") || val.includes("18kt")) return "18K";
-      if (val.includes("22k") || val.includes("22kt")) return "22K";
-      if (val.includes("silver")) return "Silver";
-    }
-    return "18K";
-  };
 
   const isExcludedFromSizeRules = (productType) => {
     const type = (productType || "").toLowerCase();
@@ -2538,4 +2547,55 @@ export default function PricingDashboard() {
       )}
     </s-page>
   );
+}
+
+// Standalone Helper Functions for Smart Fallbacks & Purity/Metal Type Validation
+function getSmartMetalTypeFallback(variant) {
+  const options = variant.selectedOptions || [];
+  for (const opt of options) {
+    const val = opt.value.toLowerCase();
+    if (val.includes("silver")) return "silver";
+  }
+  return "gold";
+}
+
+function getSmartPurityFallback(variant) {
+  const options = variant.selectedOptions || [];
+  for (const opt of options) {
+    const val = opt.value.toLowerCase();
+    if (val.includes("9k") || val.includes("9kt")) return "9K";
+    if (val.includes("14k") || val.includes("14kt")) return "14K";
+    if (val.includes("18k") || val.includes("18kt")) return "18K";
+    if (val.includes("22k") || val.includes("22kt")) return "22K";
+    if (val.includes("24k") || val.includes("24kt")) return "24K";
+    if (val.includes("silver")) return "Silver";
+  }
+  return "18K";
+}
+
+function hasOptionPurity(variant) {
+  const options = variant.selectedOptions || [];
+  for (const opt of options) {
+    const val = opt.value.toLowerCase();
+    if (
+      val.includes("9k") || val.includes("9kt") ||
+      val.includes("14k") || val.includes("14kt") ||
+      val.includes("18k") || val.includes("18kt") ||
+      val.includes("22k") || val.includes("22kt") ||
+      val.includes("24k") || val.includes("24kt") ||
+      val.includes("silver")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasOptionMetalType(variant) {
+  const options = variant.selectedOptions || [];
+  for (const opt of options) {
+    const val = opt.value.toLowerCase();
+    if (val.includes("silver")) return true;
+  }
+  return false;
 }

@@ -896,6 +896,7 @@ export async function syncAllVariantPrices(shop, graphqlClient) {
     const productId = mappedInfo.productId;
 
     try {
+      await correctVariantPurityAndMetalType(prisma, variant, mappedInfo.selectedOptions);
       const { finalPrice, metafields } = await calculatePrice(shop, variant, mappedInfo);
       
       if (!updatesByProduct[productId]) {
@@ -1123,8 +1124,8 @@ export async function runBackgroundSync(shop, jobId) {
           if (!existingDbVariantIds.has(v.id) && (mFields.metal_weight !== undefined || mFields.metal_type !== undefined || mFields.purity !== undefined)) {
             const weight = Number(mFields.metal_weight || 0);
             const dCarat = Number(mFields.diamond_carat || 0);
-            const metalType = mFields.metal_type || "gold";
-            const purity = mFields.purity || "18K";
+            const metalType = mFields.metal_type || getSmartMetalTypeFallback(v.selectedOptions);
+            const purity = mFields.purity || getSmartPurityFallback(v.selectedOptions);
             const dColor = mFields.diamond_color || "";
             const dClarity = mFields.diamond_clarity || "";
 
@@ -1194,6 +1195,7 @@ export async function runBackgroundSync(shop, jobId) {
       const productId = mappedInfo.productId;
 
       try {
+        await correctVariantPurityAndMetalType(prisma, variant, mappedInfo.selectedOptions);
         const { finalPrice, metafields } = await calculatePrice(shop, variant, mappedInfo);
         
         if (!updatesByProduct[productId]) {
@@ -1431,6 +1433,7 @@ export async function syncProductVariantPrices(shop, productId, graphqlClient) {
       selectedOptions: v.selectedOptions,
     };
 
+    await correctVariantPurityAndMetalType(prisma, dbConfig, v.selectedOptions);
     const { finalPrice, metafields } = await calculatePrice(shop, dbConfig, mappedInfo);
 
     variantUpdates.push({
@@ -1479,6 +1482,95 @@ export async function syncProductVariantPrices(shop, productId, graphqlClient) {
     await updateAuditLog(logId, "failed", { error: err.message });
     throw err;
   }
+}
+
+// Standalone Helper Functions for Smart Fallbacks & Purity/Metal Type Validation
+export function getSmartMetalTypeFallback(selectedOptions) {
+  const options = selectedOptions || [];
+  for (const opt of options) {
+    const val = opt.value.toLowerCase();
+    if (val.includes("silver")) return "silver";
+  }
+  return "gold";
+}
+
+export function getSmartPurityFallback(selectedOptions) {
+  const options = selectedOptions || [];
+  for (const opt of options) {
+    const val = opt.value.toLowerCase();
+    if (val.includes("9k") || val.includes("9kt")) return "9K";
+    if (val.includes("14k") || val.includes("14kt")) return "14K";
+    if (val.includes("18k") || val.includes("18kt")) return "18K";
+    if (val.includes("22k") || val.includes("22kt")) return "22K";
+    if (val.includes("24k") || val.includes("24kt")) return "24K";
+    if (val.includes("silver")) return "Silver";
+  }
+  return "18K";
+}
+
+export function hasOptionPurity(selectedOptions) {
+  const options = selectedOptions || [];
+  for (const opt of options) {
+    const val = opt.value.toLowerCase();
+    if (
+      val.includes("9k") || val.includes("9kt") ||
+      val.includes("14k") || val.includes("14kt") ||
+      val.includes("18k") || val.includes("18kt") ||
+      val.includes("22k") || val.includes("22kt") ||
+      val.includes("24k") || val.includes("24kt") ||
+      val.includes("silver")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function hasOptionMetalType(selectedOptions) {
+  const options = selectedOptions || [];
+  for (const opt of options) {
+    const val = opt.value.toLowerCase();
+    if (val.includes("silver")) return true;
+  }
+  return false;
+}
+
+export async function correctVariantPurityAndMetalType(prisma, dbConfig, selectedOptions) {
+  if (!dbConfig || !selectedOptions) return false;
+
+  let needsUpdate = false;
+  const updateData = {};
+
+  if (hasOptionPurity(selectedOptions)) {
+    const smartPurity = getSmartPurityFallback(selectedOptions);
+    if (dbConfig.purity !== smartPurity) {
+      dbConfig.purity = smartPurity;
+      updateData.purity = smartPurity;
+      needsUpdate = true;
+    }
+  }
+
+  if (hasOptionMetalType(selectedOptions)) {
+    const smartMetalType = getSmartMetalTypeFallback(selectedOptions);
+    if (dbConfig.metal_type !== smartMetalType) {
+      dbConfig.metal_type = smartMetalType;
+      updateData.metal_type = smartMetalType;
+      needsUpdate = true;
+    }
+  }
+
+  if (needsUpdate) {
+    try {
+      await prisma.variantWeightConfig.update({
+        where: { id: dbConfig.id },
+        data: updateData,
+      });
+      return true;
+    } catch (err) {
+      console.error(`[correctVariantPurityAndMetalType] Failed to update config ID ${dbConfig.id}:`, err);
+    }
+  }
+  return false;
 }
 
 
