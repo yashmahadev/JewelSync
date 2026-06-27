@@ -44,6 +44,7 @@ model StoreConfig {
   silver_rate         Decimal  @default(0.00) @db.Decimal(10, 2)
   making_charge_gold  Decimal  @default(0.00) @db.Decimal(10, 2)
   making_charge_silver Decimal @default(0.00) @db.Decimal(10, 2)
+  making_charge_discount_percentage Decimal @default(0.00) @db.Decimal(5, 2)
   gst_percentage      Decimal  @default(3.00) @db.Decimal(5, 2)
   updated_at          DateTime @default(now()) @updatedAt
 }

@@ -187,6 +187,12 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
     makingCharge = adjustedWeight * Number(config.making_charge_silver);
   }
 
+  // Apply making charge discount
+  const makingChargeDiscount = Number(config.making_charge_discount_percentage || 0);
+  if (makingChargeDiscount > 0) {
+    makingCharge = makingCharge * (1 - makingChargeDiscount / 100);
+  }
+
   // 5. Fetch associated diamonds (dynamic diamond rows)
   let diamonds = variant.diamonds;
   if (!diamonds) {
@@ -241,7 +247,12 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
 
         if (match) {
           pricePerCarat = Number(match.price_per_carat);
-          rowCost = totalWeight * pricePerCarat;
+          const rawRowCost = totalWeight * pricePerCarat;
+          if (makingChargeDiscount > 0) {
+            rowCost = rawRowCost * (1 - makingChargeDiscount / 100);
+          } else {
+            rowCost = rawRowCost;
+          }
           diamondCost += rowCost;
         } else {
           console.warn(

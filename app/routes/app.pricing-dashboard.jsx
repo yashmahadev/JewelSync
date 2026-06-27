@@ -26,6 +26,7 @@ export const loader = async ({ request }) => {
         silver_rate: 110.00,
         making_charge_gold: 500.00,
         making_charge_silver: 50.00,
+        making_charge_discount_percentage: 0.00,
         gst_percentage: 3.00,
       },
     });
@@ -34,6 +35,8 @@ export const loader = async ({ request }) => {
   // 2. Fetch search queries
   const url = new URL(request.url);
   const searchQ = url.searchParams.get("q") || "";
+  const after = url.searchParams.get("after") || null;
+  const before = url.searchParams.get("before") || null;
 
   // Build shopify query
   let shopifyQuery = "status:active";
@@ -41,13 +44,32 @@ export const loader = async ({ request }) => {
     shopifyQuery += ` AND title:*${searchQ}*`;
   }
 
+  let first = 10;
+  let last = null;
+  if (before) {
+    first = null;
+    last = 10;
+  }
+
   // 3. Query products from Shopify
   let products = [];
+  let pageInfo = {
+    hasNextPage: false,
+    hasPreviousPage: false,
+    startCursor: null,
+    endCursor: null,
+  };
   try {
     const response = await admin.graphql(
       `#graphql
-      query getProducts($query: String!) {
-        products(first: 25, query: $query) {
+      query getProducts($query: String!, $first: Int, $last: Int, $after: String, $before: String) {
+        products(first: $first, last: $last, after: $after, before: $before, query: $query) {
+          pageInfo {
+            hasNextPage
+            hasPreviousPage
+            startCursor
+            endCursor
+          }
           edges {
             node {
               id
@@ -85,12 +107,17 @@ export const loader = async ({ request }) => {
       {
         variables: {
           query: shopifyQuery,
+          first,
+          last,
+          after,
+          before,
         },
       }
     );
 
     const resJson = await response.json();
     products = resJson.data?.products?.edges?.map((edge) => edge.node) || [];
+    pageInfo = resJson.data?.products?.pageInfo || pageInfo;
   } catch (err) {
     console.error("Shopify product fetch error:", err);
   }
@@ -132,6 +159,7 @@ export const loader = async ({ request }) => {
     silver_rate: Number(config.silver_rate),
     making_charge_gold: Number(config.making_charge_gold),
     making_charge_silver: Number(config.making_charge_silver),
+    making_charge_discount_percentage: Number(config.making_charge_discount_percentage || 0),
     gst_percentage: Number(config.gst_percentage),
   };
 
@@ -348,6 +376,7 @@ export const loader = async ({ request }) => {
     config: serializedConfig,
     variantCount,
     products,
+    pageInfo,
     savedConfigsMap: serializedConfigsMap,
     savedRulesMap: serializedRulesMap,
     searchQ,
@@ -384,10 +413,11 @@ export const action = async ({ request }) => {
     const silver = Number(formData.get("silver"));
     const making_gold = Number(formData.get("making_gold"));
     const making_silver = Number(formData.get("making_silver"));
+    const making_charge_discount = Number(formData.get("making_charge_discount"));
     const gst = Number(formData.get("gst"));
 
     const logId = await createAuditLog(shop, "foreground_job", "save_rates", {
-      gold_9k, gold_14k, gold_18k, gold_22k, gold_24k, silver, making_gold, making_silver, gst
+      gold_9k, gold_14k, gold_18k, gold_22k, gold_24k, silver, making_gold, making_silver, making_charge_discount, gst
     });
 
     try {
@@ -402,6 +432,7 @@ export const action = async ({ request }) => {
           silver_rate: silver,
           making_charge_gold: making_gold,
           making_charge_silver: making_silver,
+          making_charge_discount_percentage: making_charge_discount,
           gst_percentage: gst,
         },
       });
@@ -620,7 +651,7 @@ export const action = async ({ request }) => {
 };
 
 export default function PricingDashboard() {
-  const { config, variantCount, products, savedConfigsMap, savedRulesMap, searchQ, uniqueColors, uniqueClarities, allDiamondRates, latestJob } = useLoaderData();
+  const { config, variantCount, products, pageInfo, savedConfigsMap, savedRulesMap, searchQ, uniqueColors, uniqueClarities, allDiamondRates, latestJob } = useLoaderData();
   const actionData = useActionData();
   const submit = useSubmit();
   const shopify = useAppBridge();
@@ -635,6 +666,7 @@ export default function PricingDashboard() {
   const [silver, setSilver] = useState(config.silver_rate);
   const [makingGold, setMakingGold] = useState(config.making_charge_gold);
   const [makingSilver, setMakingSilver] = useState(config.making_charge_silver);
+  const [makingChargeDiscountPercentage, setMakingChargeDiscountPercentage] = useState(config.making_charge_discount_percentage || 0);
   const [gst, setGst] = useState(config.gst_percentage);
 
   // Search input query state
@@ -950,6 +982,7 @@ export default function PricingDashboard() {
         silver: silver,
         making_gold: makingGold,
         making_silver: makingSilver,
+        making_charge_discount: makingChargeDiscountPercentage,
         gst: gst,
       },
       { method: "POST" }
@@ -963,6 +996,17 @@ export default function PricingDashboard() {
   const handleSearchSubmit = (e) => {
     e.preventDefault();
     submit({ q: searchVal }, { method: "GET", replace: true });
+  };
+
+  const handlePageChange = (direction, cursor) => {
+    const params = {};
+    if (searchQ) params.q = searchQ;
+    if (direction === "before") {
+      params.before = cursor;
+    } else {
+      params.after = cursor;
+    }
+    submit(params, { method: "GET", replace: true });
   };
 
   const getRuleField = (productId, field, fallback = "") => {
@@ -1043,6 +1087,12 @@ export default function PricingDashboard() {
       if (metalType === "gold") makingCharge = weight * Number(config.making_charge_gold);
       else if (metalType === "silver") makingCharge = weight * Number(config.making_charge_silver);
 
+      // Apply making charge discount
+      const makingChargeDiscount = Number(config.making_charge_discount_percentage || 0);
+      if (makingChargeDiscount > 0) {
+        makingCharge = makingCharge * (1 - makingChargeDiscount / 100);
+      }
+
       // Diamond cost
       const diamonds = getVariantField(v, "diamonds", []);
       let diamondCost = 0;
@@ -1055,7 +1105,11 @@ export default function PricingDashboard() {
                    r.clarity.toUpperCase() === d.clarity.toUpperCase()
           );
           const ppc = rateMatch ? rateMatch.price_per_carat : 0;
-          const rowCost = totalWeight * ppc;
+          const rawRowCost = totalWeight * ppc;
+          let rowCost = rawRowCost;
+          if (makingChargeDiscount > 0) {
+            rowCost = rawRowCost * (1 - makingChargeDiscount / 100);
+          }
           diamondCost += rowCost;
           diamondBreakdown.push({
             type: d.diamond_type || "Diamonds",
@@ -1753,7 +1807,14 @@ export default function PricingDashboard() {
                 onChange={(e) => setMakingSilver(e.currentTarget.value)}
               />
             </div>
-            <div className="form-group" style={{ maxWidth: "50%", marginTop: "16px", marginBottom: "24px" }}>
+            <div className="grid-2" style={{ marginTop: "16px", marginBottom: "24px" }}>
+              <s-text-field
+                name="making_charge_discount"
+                label="Making Charge Discount (%)"
+                type="number"
+                value={makingChargeDiscountPercentage}
+                onChange={(e) => setMakingChargeDiscountPercentage(e.currentTarget.value)}
+              />
               <s-text-field
                 name="gst"
                 label="GST Percentage (%)"
@@ -2192,6 +2253,27 @@ export default function PricingDashboard() {
                     </div>
                   );
                 })}
+
+                {/* Pagination Controls */}
+                {(pageInfo.hasPreviousPage || pageInfo.hasNextPage) && (
+                  <div style={{ display: "flex", justifyContent: "center", gap: "16px", marginTop: "24px", alignItems: "center", borderTop: "1px solid #e1e3e5", paddingTop: "20px" }}>
+                    <s-button
+                      disabled={!pageInfo.hasPreviousPage ? true : undefined}
+                      onClick={() => handlePageChange("before", pageInfo.startCursor)}
+                    >
+                      ← Previous
+                    </s-button>
+                    <span style={{ fontSize: "13px", color: "#202223", fontWeight: "500" }}>
+                      Showing 10 products per page
+                    </span>
+                    <s-button
+                      disabled={!pageInfo.hasNextPage ? true : undefined}
+                      onClick={() => handlePageChange("after", pageInfo.endCursor)}
+                    >
+                      Next →
+                    </s-button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2250,11 +2332,15 @@ export default function PricingDashboard() {
                     <span className="preview-summary-value" style={{ fontSize: "13px" }}>{fmt(totals.metal)}</span>
                   </div>
                   <div className="preview-summary-item">
-                    <span className="preview-summary-label">Making (All)</span>
+                    <span className="preview-summary-label">
+                      Making (All) {config.making_charge_discount_percentage > 0 ? `(-${Number(config.making_charge_discount_percentage)}%)` : ""}
+                    </span>
                     <span className="preview-summary-value" style={{ fontSize: "13px" }}>{fmt(totals.making)}</span>
                   </div>
                   <div className="preview-summary-item">
-                    <span className="preview-summary-label">Diamond (All)</span>
+                    <span className="preview-summary-label">
+                      Diamond (All) {config.making_charge_discount_percentage > 0 ? `(-${Number(config.making_charge_discount_percentage)}%)` : ""}
+                    </span>
                     <span className="preview-summary-value" style={{ fontSize: "13px", color: "#5b21b6" }}>{fmt(totals.diamond)}</span>
                   </div>
                   <div className="preview-summary-item">
@@ -2281,9 +2367,9 @@ export default function PricingDashboard() {
                       <th>Weight (g)</th>
                       <th>Rate (₹/g)</th>
                       <th>Metal Cost</th>
-                      <th>Making</th>
+                      <th>Making {config.making_charge_discount_percentage > 0 ? `(-${Number(config.making_charge_discount_percentage)}%)` : ""}</th>
                       <th>Diamonds</th>
-                      <th>Diamond Cost</th>
+                      <th>Diamond Cost {config.making_charge_discount_percentage > 0 ? `(-${Number(config.making_charge_discount_percentage)}%)` : ""}</th>
                       <th>Subtotal</th>
                       <th>GST ({config.gst_percentage}%)</th>
                       <th style={{ minWidth: "120px" }}>Final Price</th>
@@ -2429,13 +2515,16 @@ export default function PricingDashboard() {
                           value={d.shape || "Round"}
                           onChange={(e) => updateModalDiamondRow(index, "shape", e.target.value)}
                         >
-                          <option value="Oval">Oval</option>
-                          <option value="Round">Round</option>
-                          <option value="Marquise">Marquise</option>
-                          <option value="Princess">Princess</option>
-                          <option value="Pear">Pear</option>
-                          <option value="Emerald">Emerald</option>
+                          <option value="Asscher">Asscher</option>
                           <option value="Cushion">Cushion</option>
+                          <option value="Emerald">Emerald</option>
+                          <option value="Heart">Heart</option>
+                          <option value="Marquise">Marquise</option>
+                          <option value="Oval">Oval</option>
+                          <option value="Pears">Pears</option>
+                          <option value="Princess">Princess</option>
+                          <option value="Radiant">Radiant</option>
+                          <option value="Round">Round</option>
                         </select>
                       </td>
                       <td>
