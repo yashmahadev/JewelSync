@@ -237,13 +237,40 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
       if (totalWeight > 0 && d.color && d.clarity) {
         const individualCarat = totalWeight / count;
 
-        const match = await prisma.diamondRate.findFirst({
+        const colorVal = d.color ? d.color.toUpperCase() : "*";
+        const clarityVal = d.clarity ? d.clarity.toUpperCase() : "*";
+
+        let match = await prisma.diamondRate.findFirst({
           where: {
             shop,
-            color: d.color,
-            clarity: d.clarity,
+            color: colorVal,
+            clarity: clarityVal,
+            size_min: { lte: individualCarat },
+            size_max: { gte: individualCarat },
           },
         });
+
+        if (!match) {
+          match = await prisma.diamondRate.findFirst({
+            where: {
+              shop,
+              color: "*",
+              clarity: "*",
+              size_min: { lte: individualCarat },
+              size_max: { gte: individualCarat },
+            },
+          });
+        }
+
+        if (!match) {
+          match = await prisma.diamondRate.findFirst({
+            where: {
+              shop,
+              color: colorVal,
+              clarity: clarityVal,
+            },
+          });
+        }
 
         if (match) {
           pricePerCarat = Number(match.price_per_carat);

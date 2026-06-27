@@ -73,34 +73,70 @@ export const action = async ({ request }) => {
     const records = cleanRows.map(row => {
       const color = row.color || row.colour || row.col;
       const clarity = row.clarity || row.clar;
-      const size = row.size || row.carat || row.wt;
+      const sizeVal = row.size || row.carat || row.wt || row['weight(ct)'] || row.weight || row.range;
       const price = row.price || row.rate || row.cost;
 
+      const colorClean = color ? String(color).trim().toUpperCase() : "*";
+      const clarityClean = clarity ? String(clarity).trim().toUpperCase() : "*";
+
+      let min = 0.0;
+      let max = 0.0;
+      let hasExplicitRange = false;
+
+      if (sizeVal !== undefined && sizeVal !== null && sizeVal !== "") {
+        const str = String(sizeVal).trim();
+        if (str.includes("-")) {
+          const parts = str.split("-").map(p => parseFloat(p.trim()));
+          if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            min = parts[0];
+            max = parts[1];
+            hasExplicitRange = true;
+          }
+        } else {
+          const val = parseFloat(str);
+          if (!isNaN(val)) {
+            min = val;
+            max = val;
+          }
+        }
+      }
+
       return {
-        color: color ? String(color).trim().toUpperCase() : null,
-        clarity: clarity ? String(clarity).trim().toUpperCase() : null,
-        size: size !== undefined && size !== null && size !== "" && !isNaN(Number(size)) ? Number(size) : 0.0,
+        color: colorClean,
+        clarity: clarityClean,
+        size: min,
+        min,
+        max,
+        hasExplicitRange,
         price: price !== undefined ? Number(price) : NaN
       };
-    }).filter(r => r.color && r.clarity && !isNaN(r.price));
+    }).filter(r => !isNaN(r.price));
 
     if (records.length === 0) {
       return { 
         success: false, 
-        error: "Missing required columns or no valid records. Please ensure your file has Color, Clarity, and Price columns." 
+        error: "Missing required columns or no valid records. Please ensure your file has Price and either Weight/Size or Color/Clarity columns." 
       };
     }
 
-    // Sort unique sizes to build dynamic ranges (tiers)
-    const uniqueSizes = [...new Set(records.map(r => r.size))].sort((a, b) => a - b);
-    
-    // Build ranges
-    const sizeRanges = {};
-    for (let i = 0; i < uniqueSizes.length; i++) {
-      const size = uniqueSizes[i];
-      const min = i === 0 ? 0.000 : (uniqueSizes[i - 1] + size) / 2 + 0.001;
-      const max = i === uniqueSizes.length - 1 ? 99.999 : (size + uniqueSizes[i + 1]) / 2;
-      sizeRanges[size] = { min, max };
+    // Sort unique sizes to build dynamic ranges (tiers) for records without explicit range
+    const recordsWithoutExplicitRange = records.filter(r => !r.hasExplicitRange);
+    if (recordsWithoutExplicitRange.length > 0) {
+      const uniqueSizes = [...new Set(recordsWithoutExplicitRange.map(r => r.size))].sort((a, b) => a - b);
+      const sizeRanges = {};
+      for (let i = 0; i < uniqueSizes.length; i++) {
+        const size = uniqueSizes[i];
+        const minVal = i === 0 ? 0.000 : (uniqueSizes[i - 1] + size) / 2 + 0.001;
+        const maxVal = i === uniqueSizes.length - 1 ? 99.999 : (size + uniqueSizes[i + 1]) / 2;
+        sizeRanges[size] = { min: minVal, max: maxVal };
+      }
+      records.forEach(r => {
+        if (!r.hasExplicitRange) {
+          const range = sizeRanges[r.size];
+          r.min = range.min;
+          r.max = range.max;
+        }
+      });
     }
 
     // Delete old rates and bulk insert new rates
@@ -109,13 +145,12 @@ export const action = async ({ request }) => {
     });
 
     const createData = records.map(r => {
-      const range = sizeRanges[r.size];
       return {
         shop,
         color: r.color,
         clarity: r.clarity,
-        size_min: range.min,
-        size_max: range.max,
+        size_min: r.min,
+        size_max: r.max,
         price_per_carat: r.price
       };
     });
@@ -238,6 +273,7 @@ export default function DiamondRates() {
                 <table className="diamond-table">
                   <thead>
                     <tr>
+                      <th>Weight Range (CT)</th>
                       <th>Color</th>
                       <th>Clarity</th>
                       <th>Price Per Carat (₹)</th>
@@ -246,6 +282,7 @@ export default function DiamondRates() {
                   <tbody>
                     {diamondRates.map((rate) => (
                       <tr key={rate.id}>
+                        <td>{rate.size_min.toFixed(3)} - {rate.size_max.toFixed(3)} ct</td>
                         <td>{rate.color}</td>
                         <td>{rate.clarity}</td>
                         <td><strong>₹{Number(rate.price_per_carat).toLocaleString()}</strong></td>

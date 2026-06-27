@@ -354,7 +354,7 @@ export const loader = async ({ request }) => {
 
   const diamondRates = await prisma.diamondRate.findMany({
     where: { shop },
-    select: { color: true, clarity: true, price_per_carat: true },
+    select: { color: true, clarity: true, size_min: true, size_max: true, price_per_carat: true },
   });
 
   const uniqueColors = [...new Set(diamondRates.map((r) => r.color.toUpperCase()))].sort();
@@ -364,6 +364,8 @@ export const loader = async ({ request }) => {
   const allDiamondRates = diamondRates.map((r) => ({
     color: r.color.toUpperCase(),
     clarity: r.clarity.toUpperCase(),
+    size_min: Number(r.size_min),
+    size_max: Number(r.size_max),
     price_per_carat: Number(r.price_per_carat),
   }));
 
@@ -1100,10 +1102,34 @@ export default function PricingDashboard() {
       for (const d of diamonds) {
         const totalWeight = Number(d.total_weight || 0);
         if (totalWeight > 0 && d.color && d.clarity) {
-          const rateMatch = (allDiamondRates || []).find(
-            (r) => r.color.toUpperCase() === d.color.toUpperCase() &&
-                   r.clarity.toUpperCase() === d.clarity.toUpperCase()
+          const count = Number(d.count || 1);
+          const individualCarat = totalWeight / count;
+          const colorVal = d.color.toUpperCase();
+          const clarityVal = d.clarity.toUpperCase();
+
+          let rateMatch = (allDiamondRates || []).find(
+            (r) => r.color === colorVal &&
+                   r.clarity === clarityVal &&
+                   r.size_min <= individualCarat &&
+                   r.size_max >= individualCarat
           );
+
+          if (!rateMatch) {
+            rateMatch = (allDiamondRates || []).find(
+              (r) => r.color === "*" &&
+                     r.clarity === "*" &&
+                     r.size_min <= individualCarat &&
+                     r.size_max >= individualCarat
+            );
+          }
+
+          if (!rateMatch) {
+            rateMatch = (allDiamondRates || []).find(
+              (r) => r.color === colorVal &&
+                     r.clarity === clarityVal
+            );
+          }
+
           const ppc = rateMatch ? rateMatch.price_per_carat : 0;
           const rawRowCost = totalWeight * ppc;
           let rowCost = rawRowCost;
