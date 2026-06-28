@@ -19,7 +19,7 @@ export default function App() {
         <s-link href="/app">Home</s-link>
         <s-link href="/app/pricing-dashboard">Pricing Dashboard</s-link>
         <s-link href="/app/diamond-rates">Diamond Rates</s-link>
-        <s-link href="/app/bulk-metafields">Bulk Metafields</s-link>
+        {/* <s-link href="/app/bulk-metafields">Bulk Metafields</s-link> */}
       </s-app-nav>
       <Outlet />
     </AppProvider>
