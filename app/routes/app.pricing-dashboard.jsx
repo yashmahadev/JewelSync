@@ -186,6 +186,9 @@ export const loader = async ({ request }) => {
   });
 
   // Re-populate DB configs from Shopify metafields if missing (e.g. on reinstall)
+  const updatePromises = [];
+  const configsToCreate = [];
+
   for (const product of products) {
     const variants = product.variants.edges || [];
     for (const edge of variants) {
@@ -214,10 +217,12 @@ export const loader = async ({ request }) => {
         }
 
         if (dbConfigUpdated) {
-          await prisma.variantWeightConfig.update({
-            where: { id: dbConfig.id },
-            data: updateData,
-          });
+          updatePromises.push(
+            prisma.variantWeightConfig.update({
+              where: { id: dbConfig.id },
+              data: updateData,
+            })
+          );
         }
       } else {
         const mEdges = v.metafields?.edges || [];
@@ -229,45 +234,62 @@ export const loader = async ({ request }) => {
         });
 
         if (mFields.metal_weight !== undefined || mFields.metal_type !== undefined || mFields.purity !== undefined) {
-          const weight = Number(mFields.metal_weight || 0);
-          const dCarat = Number(mFields.diamond_carat || 0);
-          const metalType = mFields.metal_type || getSmartMetalTypeFallback(v);
-          const purity = mFields.purity || getSmartPurityFallback(v);
-          const dColor = mFields.diamond_color || "";
-          const dClarity = mFields.diamond_clarity || "";
+          configsToCreate.push({ v, mFields });
+        }
+      }
+    }
+  }
 
-          const createdConfig = await prisma.variantWeightConfig.upsert({
-            where: { variant_id: v.id },
-            update: {
-              sku: v.sku || "",
-              metal_type: metalType,
-              purity: purity,
-              metal_weight: weight,
-              diamond_color: dColor || null,
-              diamond_clarity: dClarity || null,
-              diamond_carat: dCarat,
-            },
-            create: {
-              shop,
-              variant_id: v.id,
-              sku: v.sku || "",
-              metal_type: metalType,
-              purity: purity,
-              metal_weight: weight,
-              diamond_color: dColor || null,
-              diamond_clarity: dClarity || null,
-              diamond_carat: dCarat,
-            },
-          });
+  // 1. Run all updates in parallel
+  if (updatePromises.length > 0) {
+    await Promise.all(updatePromises);
+  }
 
-          // Check if there are dynamic diamonds in Shopify metafield JSON
-          let createdDiamonds = [];
-          if (mFields.diamond_details) {
-            try {
-              const parsed = JSON.parse(mFields.diamond_details);
-              if (Array.isArray(parsed)) {
-                for (const d of parsed) {
-                  const newD = await prisma.variantDiamondConfig.create({
+  // 2. Run all creations concurrently
+  if (configsToCreate.length > 0) {
+    await Promise.all(
+      configsToCreate.map(async ({ v, mFields }) => {
+        const weight = Number(mFields.metal_weight || 0);
+        const dCarat = Number(mFields.diamond_carat || 0);
+        const metalType = mFields.metal_type || getSmartMetalTypeFallback(v);
+        const purity = mFields.purity || getSmartPurityFallback(v);
+        const dColor = mFields.diamond_color || "";
+        const dClarity = mFields.diamond_clarity || "";
+
+        const createdConfig = await prisma.variantWeightConfig.upsert({
+          where: { variant_id: v.id },
+          update: {
+            sku: v.sku || "",
+            metal_type: metalType,
+            purity: purity,
+            metal_weight: weight,
+            diamond_color: dColor || null,
+            diamond_clarity: dClarity || null,
+            diamond_carat: dCarat,
+          },
+          create: {
+            shop,
+            variant_id: v.id,
+            sku: v.sku || "",
+            metal_type: metalType,
+            purity: purity,
+            metal_weight: weight,
+            diamond_color: dColor || null,
+            diamond_clarity: dClarity || null,
+            diamond_carat: dCarat,
+          },
+        });
+
+        let createdDiamonds = [];
+        const diamondPromises = [];
+
+        if (mFields.diamond_details) {
+          try {
+            const parsed = JSON.parse(mFields.diamond_details);
+            if (Array.isArray(parsed)) {
+              for (const d of parsed) {
+                diamondPromises.push(
+                  prisma.variantDiamondConfig.create({
                     data: {
                       variant_config_id: createdConfig.id,
                       diamond_type: d.type || "Diamonds",
@@ -277,25 +299,18 @@ export const loader = async ({ request }) => {
                       count: Number(d.count || 1),
                       total_weight: Number(d.total_weight || d.carat || 0),
                     },
-                  });
-                  createdDiamonds.push({
-                    id: newD.id,
-                    diamond_type: newD.diamond_type,
-                    shape: newD.shape,
-                    color: newD.color,
-                    clarity: newD.clarity,
-                    count: newD.count,
-                    total_weight: Number(newD.total_weight),
-                  });
-                }
+                  })
+                );
               }
-            } catch (err) {
-              console.error("Error parsing diamond_details JSON during reinstall repopulate:", err);
             }
+          } catch (err) {
+            console.error("Error parsing diamond_details JSON during reinstall repopulate:", err);
           }
+        }
 
-          if (createdDiamonds.length === 0 && dCarat > 0 && dColor && dClarity) {
-            const newD = await prisma.variantDiamondConfig.create({
+        if (diamondPromises.length === 0 && dCarat > 0 && dColor && dClarity) {
+          diamondPromises.push(
+            prisma.variantDiamondConfig.create({
               data: {
                 variant_config_id: createdConfig.id,
                 diamond_type: "Diamonds",
@@ -305,31 +320,35 @@ export const loader = async ({ request }) => {
                 count: 1,
                 total_weight: dCarat,
               },
-            });
-            createdDiamonds.push({
-              id: newD.id,
-              diamond_type: newD.diamond_type,
-              shape: newD.shape,
-              color: newD.color,
-              clarity: newD.clarity,
-              count: newD.count,
-              total_weight: Number(newD.total_weight),
-            });
-          }
-
-          serializedConfigsMap[v.id] = {
-            id: createdConfig.id,
-            metal_type: metalType,
-            purity: purity,
-            metal_weight: weight,
-            diamond_color: dColor,
-            diamond_clarity: dClarity,
-            diamond_carat: dCarat,
-            diamonds: createdDiamonds,
-          };
+            })
+          );
         }
-      }
-    }
+
+        if (diamondPromises.length > 0) {
+          const newDiamonds = await Promise.all(diamondPromises);
+          createdDiamonds = newDiamonds.map((d) => ({
+            id: d.id,
+            diamond_type: d.diamond_type,
+            shape: d.shape,
+            color: d.color,
+            clarity: d.clarity,
+            count: d.count,
+            total_weight: Number(d.total_weight),
+          }));
+        }
+
+        serializedConfigsMap[v.id] = {
+          id: createdConfig.id,
+          metal_type: metalType,
+          purity: purity,
+          metal_weight: weight,
+          diamond_color: dColor,
+          diamond_clarity: dClarity,
+          diamond_carat: dCarat,
+          diamonds: createdDiamonds,
+        };
+      })
+    );
   }
 
   const sizeRules = await prisma.productSizeWeightRule.findMany({
