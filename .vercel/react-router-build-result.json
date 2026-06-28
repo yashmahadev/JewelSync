@@ -1,0 +1,318 @@
+{
+  "buildManifest": {
+    "serverBundles": {
+      "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0": {
+        "id": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+        "file": "build/server/nodejs_eyJydW50aW1lIjoibm9kZWpzIn0/index.js",
+        "config": {
+          "runtime": "nodejs"
+        }
+      }
+    },
+    "routeIdToServerBundleId": {
+      "routes/webhooks.app.scopes_update": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/webhooks.app.uninstalled": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/webhooks.products.update": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/api.pricing": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/auth.login": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/auth.$": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/_index": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/app.pricing-dashboard": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/app.bulk-metafields": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/app.diamond-rates": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/app._index": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0"
+    },
+    "routes": {
+      "root": {
+        "id": "root",
+        "file": "app/root.jsx",
+        "path": "",
+        "config": {}
+      },
+      "routes/webhooks.app.scopes_update": {
+        "id": "routes/webhooks.app.scopes_update",
+        "parentId": "root",
+        "file": "app/routes/webhooks.app.scopes_update.jsx",
+        "path": "webhooks/app/scopes_update",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/webhooks.app.uninstalled": {
+        "id": "routes/webhooks.app.uninstalled",
+        "parentId": "root",
+        "file": "app/routes/webhooks.app.uninstalled.jsx",
+        "path": "webhooks/app/uninstalled",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/webhooks.products.update": {
+        "id": "routes/webhooks.products.update",
+        "parentId": "root",
+        "file": "app/routes/webhooks.products.update.jsx",
+        "path": "webhooks/products/update",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/api.pricing": {
+        "id": "routes/api.pricing",
+        "parentId": "root",
+        "file": "app/routes/api.pricing.jsx",
+        "path": "api/pricing",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/auth.login": {
+        "id": "routes/auth.login",
+        "parentId": "root",
+        "file": "app/routes/auth.login/route.jsx",
+        "path": "auth/login",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/auth.$": {
+        "id": "routes/auth.$",
+        "parentId": "root",
+        "file": "app/routes/auth.$.jsx",
+        "path": "auth/*",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/_index": {
+        "id": "routes/_index",
+        "parentId": "root",
+        "file": "app/routes/_index/route.jsx",
+        "index": true,
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/app": {
+        "id": "routes/app",
+        "parentId": "root",
+        "file": "app/routes/app.jsx",
+        "path": "app",
+        "config": {}
+      },
+      "routes/app.pricing-dashboard": {
+        "id": "routes/app.pricing-dashboard",
+        "parentId": "routes/app",
+        "file": "app/routes/app.pricing-dashboard.jsx",
+        "path": "pricing-dashboard",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/app.bulk-metafields": {
+        "id": "routes/app.bulk-metafields",
+        "parentId": "routes/app",
+        "file": "app/routes/app.bulk-metafields.jsx",
+        "path": "bulk-metafields",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/app.diamond-rates": {
+        "id": "routes/app.diamond-rates",
+        "parentId": "routes/app",
+        "file": "app/routes/app.diamond-rates.jsx",
+        "path": "diamond-rates",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/app._index": {
+        "id": "routes/app._index",
+        "parentId": "routes/app",
+        "file": "app/routes/app._index.jsx",
+        "index": true,
+        "config": {
+          "runtime": "nodejs"
+        }
+      }
+    }
+  },
+  "reactRouterConfig": {
+    "appDirectory": "D:/jewelry-manager/app",
+    "basename": "/",
+    "buildDirectory": "D:/jewelry-manager/build",
+    "future": {
+      "unstable_optimizeDeps": false,
+      "v8_passThroughRequests": false,
+      "v8_trailingSlashAwareDataRequests": false,
+      "unstable_previewServerPrerendering": false,
+      "v8_middleware": false,
+      "v8_splitRouteModules": false,
+      "v8_viteEnvironmentApi": false
+    },
+    "routes": {
+      "root": {
+        "id": "root",
+        "file": "root.jsx",
+        "path": ""
+      },
+      "routes/webhooks.app.scopes_update": {
+        "id": "routes/webhooks.app.scopes_update",
+        "parentId": "root",
+        "file": "routes/webhooks.app.scopes_update.jsx",
+        "path": "webhooks/app/scopes_update"
+      },
+      "routes/webhooks.app.uninstalled": {
+        "id": "routes/webhooks.app.uninstalled",
+        "parentId": "root",
+        "file": "routes/webhooks.app.uninstalled.jsx",
+        "path": "webhooks/app/uninstalled"
+      },
+      "routes/webhooks.products.update": {
+        "id": "routes/webhooks.products.update",
+        "parentId": "root",
+        "file": "routes/webhooks.products.update.jsx",
+        "path": "webhooks/products/update"
+      },
+      "routes/api.pricing": {
+        "id": "routes/api.pricing",
+        "parentId": "root",
+        "file": "routes/api.pricing.jsx",
+        "path": "api/pricing"
+      },
+      "routes/auth.login": {
+        "id": "routes/auth.login",
+        "parentId": "root",
+        "file": "routes/auth.login/route.jsx",
+        "path": "auth/login"
+      },
+      "routes/auth.$": {
+        "id": "routes/auth.$",
+        "parentId": "root",
+        "file": "routes/auth.$.jsx",
+        "path": "auth/*"
+      },
+      "routes/_index": {
+        "id": "routes/_index",
+        "parentId": "root",
+        "file": "routes/_index/route.jsx",
+        "index": true
+      },
+      "routes/app": {
+        "id": "routes/app",
+        "parentId": "root",
+        "file": "routes/app.jsx",
+        "path": "app"
+      },
+      "routes/app.pricing-dashboard": {
+        "id": "routes/app.pricing-dashboard",
+        "parentId": "routes/app",
+        "file": "routes/app.pricing-dashboard.jsx",
+        "path": "pricing-dashboard"
+      },
+      "routes/app.bulk-metafields": {
+        "id": "routes/app.bulk-metafields",
+        "parentId": "routes/app",
+        "file": "routes/app.bulk-metafields.jsx",
+        "path": "bulk-metafields"
+      },
+      "routes/app.diamond-rates": {
+        "id": "routes/app.diamond-rates",
+        "parentId": "routes/app",
+        "file": "routes/app.diamond-rates.jsx",
+        "path": "diamond-rates"
+      },
+      "routes/app._index": {
+        "id": "routes/app._index",
+        "parentId": "routes/app",
+        "file": "routes/app._index.jsx",
+        "index": true
+      }
+    },
+    "routeDiscovery": {
+      "mode": "lazy",
+      "manifestPath": "/__manifest"
+    },
+    "serverBuildFile": "index.js",
+    "serverModuleFormat": "esm",
+    "ssr": true,
+    "subResourceIntegrity": false,
+    "allowedActionOrigins": false,
+    "unstable_routeConfig": [
+      {
+        "id": "root",
+        "path": "",
+        "file": "root.jsx",
+        "children": [
+          {
+            "id": "routes/webhooks.app.scopes_update",
+            "file": "routes/webhooks.app.scopes_update.jsx",
+            "path": "webhooks/app/scopes_update"
+          },
+          {
+            "id": "routes/webhooks.app.uninstalled",
+            "file": "routes/webhooks.app.uninstalled.jsx",
+            "path": "webhooks/app/uninstalled"
+          },
+          {
+            "id": "routes/webhooks.products.update",
+            "file": "routes/webhooks.products.update.jsx",
+            "path": "webhooks/products/update"
+          },
+          {
+            "id": "routes/api.pricing",
+            "file": "routes/api.pricing.jsx",
+            "path": "api/pricing"
+          },
+          {
+            "id": "routes/auth.login",
+            "file": "routes/auth.login/route.jsx",
+            "path": "auth/login"
+          },
+          {
+            "id": "routes/auth.$",
+            "file": "routes/auth.$.jsx",
+            "path": "auth/*"
+          },
+          {
+            "id": "routes/_index",
+            "file": "routes/_index/route.jsx",
+            "index": true
+          },
+          {
+            "id": "routes/app",
+            "file": "routes/app.jsx",
+            "path": "app",
+            "children": [
+              {
+                "id": "routes/app.pricing-dashboard",
+                "file": "routes/app.pricing-dashboard.jsx",
+                "path": "pricing-dashboard"
+              },
+              {
+                "id": "routes/app.bulk-metafields",
+                "file": "routes/app.bulk-metafields.jsx",
+                "path": "bulk-metafields"
+              },
+              {
+                "id": "routes/app.diamond-rates",
+                "file": "routes/app.diamond-rates.jsx",
+                "path": "diamond-rates"
+              },
+              {
+                "id": "routes/app._index",
+                "file": "routes/app._index.jsx",
+                "index": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "viteConfig": {
+    "build": {
+      "assetsDir": "assets"
+    }
+  }
+}
