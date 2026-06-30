@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { syncAllVariantPrices } from "../pricing.server";
+import { syncProductVariantPrices } from "../pricing.server";
 
 // Sample jewelry SKUs matching Glemzee.xlsx catalog
 const SAMPLE_PRODUCTS = [
@@ -272,7 +272,9 @@ export const action = async ({ request }) => {
   if (created.length > 0) {
     try {
       console.log(`Automatically recalculating & syncing prices and metafields for newly created products...`);
-      await syncAllVariantPrices(shop, admin.graphql);
+      for (const p of created) {
+        await syncProductVariantPrices(shop, p.id, admin.graphql);
+      }
     } catch (syncErr) {
       console.error(`Automatic sync failed:`, syncErr);
     }

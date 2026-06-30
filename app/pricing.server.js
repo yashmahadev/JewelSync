@@ -1030,7 +1030,7 @@ export async function syncAllVariantPrices(shop, graphqlClient) {
   // 3. Execute bulk update per product
   for (const [productId, variantUpdates] of Object.entries(updatesByProduct)) {
     try {
-      const CHUNK_SIZE = 2;
+      const CHUNK_SIZE = 50;
       let allUpdatedVariants = [];
       let hasError = false;
       let errorMessage = "";
@@ -1348,7 +1348,7 @@ export async function runBackgroundSync(shop, jobId) {
       let failCount = 0;
 
       try {
-        const CHUNK_SIZE = 2;
+        const CHUNK_SIZE = 50;
         let allUpdatedVariants = [];
         let hasError = false;
         let errorMessage = "";
@@ -1564,7 +1564,7 @@ export async function syncProductVariantPrices(shop, productId, graphqlClient) {
   }
 
   if (variantUpdates.length > 0) {
-    const CHUNK_SIZE = 2;
+    const CHUNK_SIZE = 50;
     for (let i = 0; i < variantUpdates.length; i += CHUNK_SIZE) {
       const chunk = variantUpdates.slice(i, i + CHUNK_SIZE);
       const updateResponse = await callGraphQLWithRetry(
