@@ -186,6 +186,7 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
   } else if (variant.metal_type === "silver") {
     makingCharge = adjustedWeight * Number(config.making_charge_silver);
   }
+  const rawMakingCharge = makingCharge;
 
   // Apply making charge discount
   const makingChargeDiscount = Number(config.making_charge_discount_percentage || 0);
@@ -223,6 +224,7 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
 
   // Calculate Diamond Cost
   let diamondCost = 0;
+  let rawDiamondCost = 0;
   let totalDiamondCarats = 0;
   const diamondDetails = [];
 
@@ -276,6 +278,7 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
         if (match) {
           pricePerCarat = Number(match.price_per_carat);
           const rawRowCost = totalWeight * pricePerCarat;
+          rawDiamondCost += rawRowCost;
           if (diamondDiscount > 0) {
             rowCost = rawRowCost * (1 - diamondDiscount / 100);
           } else {
@@ -379,6 +382,18 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
       namespace: "custom",
       key: "gold_price",
       value: Math.round(variant.metal_type === "gold" ? metalCost : 0).toString(),
+      type: "number_decimal",
+    },
+    {
+      namespace: "custom",
+      key: "original_making_charges",
+      value: Math.round(rawMakingCharge).toString(),
+      type: "number_decimal",
+    },
+    {
+      namespace: "custom",
+      key: "original_diamond_price",
+      value: Math.round(rawDiamondCost).toString(),
       type: "number_decimal",
     },
     {
@@ -704,6 +719,20 @@ export async function ensureMetafieldDefinitions(graphqlClient) {
       namespace: "custom",
       key: "diamond_discount",
       type: "single_line_text_field",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Original Making Charges",
+      namespace: "custom",
+      key: "original_making_charges",
+      type: "number_decimal",
+      ownerType: "PRODUCTVARIANT",
+    },
+    {
+      name: "Original Diamond Price",
+      namespace: "custom",
+      key: "original_diamond_price",
+      type: "number_decimal",
       ownerType: "PRODUCTVARIANT",
     },
     {
