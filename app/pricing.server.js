@@ -359,25 +359,25 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
     {
       namespace: "custom",
       key: "gst",
-      value: gst.toFixed(2),
+      value: Math.round(gst).toString(),
       type: "number_decimal",
     },
     {
       namespace: "custom",
       key: "making_charges",
-      value: makingCharge.toFixed(2),
+      value: Math.round(makingCharge).toString(),
       type: "number_decimal",
     },
     {
       namespace: "custom",
       key: "diamond_price",
-      value: diamondCost.toFixed(2),
+      value: Math.round(diamondCost).toString(),
       type: "number_decimal",
     },
     {
       namespace: "custom",
       key: "gold_price",
-      value: (variant.metal_type === "gold" ? metalCost : 0).toFixed(2),
+      value: Math.round(variant.metal_type === "gold" ? metalCost : 0).toString(),
       type: "number_decimal",
     },
     {
@@ -389,7 +389,7 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
     {
       namespace: "custom",
       key: "gold_weight",
-      value: `${baseWeight.toFixed(2)} Grams`,
+      value: `${parseFloat(Number(variant.metal_weight || 0).toFixed(3)).toString()} Grams`,
       type: "single_line_text_field",
     },
     {
