@@ -189,6 +189,7 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
 
   // Apply making charge discount
   const makingChargeDiscount = Number(config.making_charge_discount_percentage || 0);
+  const diamondDiscount = Number(config.diamond_discount_percentage || 0);
   if (makingChargeDiscount > 0) {
     makingCharge = makingCharge * (1 - makingChargeDiscount / 100);
   }
@@ -275,8 +276,8 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
         if (match) {
           pricePerCarat = Number(match.price_per_carat);
           const rawRowCost = totalWeight * pricePerCarat;
-          if (makingChargeDiscount > 0) {
-            rowCost = rawRowCost * (1 - makingChargeDiscount / 100);
+          if (diamondDiscount > 0) {
+            rowCost = rawRowCost * (1 - diamondDiscount / 100);
           } else {
             rowCost = rawRowCost;
           }
@@ -425,13 +426,17 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
     {
       namespace: "custom",
       key: "diamond_label",
-      value: `Diamonds (${totalDiamondCarats.toFixed(2)} Ct)`,
+      value: diamondDiscount > 0
+        ? `Diamonds (${totalDiamondCarats.toFixed(2)} Ct) (${diamondDiscount}% Off)`
+        : `Diamonds (${totalDiamondCarats.toFixed(2)} Ct)`,
       type: "single_line_text_field",
     },
     {
       namespace: "custom",
       key: "making_label",
-      value: "Making Charges",
+      value: makingChargeDiscount > 0
+        ? `Making Charges (${makingChargeDiscount}% Off)`
+        : "Making Charges",
       type: "single_line_text_field",
     },
     {

@@ -27,6 +27,7 @@ export const loader = async ({ request }) => {
         making_charge_gold: 500.00,
         making_charge_silver: 50.00,
         making_charge_discount_percentage: 0.00,
+        diamond_discount_percentage: 0.00,
         gst_percentage: 3.00,
       },
     });
@@ -160,6 +161,7 @@ export const loader = async ({ request }) => {
     making_charge_gold: Number(config.making_charge_gold),
     making_charge_silver: Number(config.making_charge_silver),
     making_charge_discount_percentage: Number(config.making_charge_discount_percentage || 0),
+    diamond_discount_percentage: Number(config.diamond_discount_percentage || 0),
     gst_percentage: Number(config.gst_percentage),
   };
 
@@ -435,10 +437,11 @@ export const action = async ({ request }) => {
     const making_gold = Number(formData.get("making_gold"));
     const making_silver = Number(formData.get("making_silver"));
     const making_charge_discount = Number(formData.get("making_charge_discount"));
+    const diamond_discount = Number(formData.get("diamond_discount"));
     const gst = Number(formData.get("gst"));
 
     const logId = await createAuditLog(shop, "foreground_job", "save_rates", {
-      gold_9k, gold_14k, gold_18k, gold_22k, gold_24k, silver, making_gold, making_silver, making_charge_discount, gst
+      gold_9k, gold_14k, gold_18k, gold_22k, gold_24k, silver, making_gold, making_silver, making_charge_discount, diamond_discount, gst
     });
 
     try {
@@ -454,6 +457,7 @@ export const action = async ({ request }) => {
           making_charge_gold: making_gold,
           making_charge_silver: making_silver,
           making_charge_discount_percentage: making_charge_discount,
+          diamond_discount_percentage: diamond_discount,
           gst_percentage: gst,
         },
       });
@@ -688,6 +692,7 @@ export default function PricingDashboard() {
   const [makingGold, setMakingGold] = useState(config.making_charge_gold);
   const [makingSilver, setMakingSilver] = useState(config.making_charge_silver);
   const [makingChargeDiscountPercentage, setMakingChargeDiscountPercentage] = useState(config.making_charge_discount_percentage || 0);
+  const [diamondDiscountPercentage, setDiamondDiscountPercentage] = useState(config.diamond_discount_percentage || 0);
   const [gst, setGst] = useState(config.gst_percentage);
 
   // Search input query state
@@ -1004,6 +1009,7 @@ export default function PricingDashboard() {
         making_gold: makingGold,
         making_silver: makingSilver,
         making_charge_discount: makingChargeDiscountPercentage,
+        diamond_discount: diamondDiscountPercentage,
         gst: gst,
       },
       { method: "POST" }
@@ -1110,6 +1116,7 @@ export default function PricingDashboard() {
 
       // Apply making charge discount
       const makingChargeDiscount = Number(config.making_charge_discount_percentage || 0);
+      const diamondDiscount = Number(config.diamond_discount_percentage || 0);
       if (makingChargeDiscount > 0) {
         makingCharge = makingCharge * (1 - makingChargeDiscount / 100);
       }
@@ -1152,8 +1159,8 @@ export default function PricingDashboard() {
           const ppc = rateMatch ? rateMatch.price_per_carat : 0;
           const rawRowCost = totalWeight * ppc;
           let rowCost = rawRowCost;
-          if (makingChargeDiscount > 0) {
-            rowCost = rawRowCost * (1 - makingChargeDiscount / 100);
+          if (diamondDiscount > 0) {
+            rowCost = rawRowCost * (1 - diamondDiscount / 100);
           }
           diamondCost += rowCost;
           diamondBreakdown.push({
@@ -1852,7 +1859,7 @@ export default function PricingDashboard() {
                 onChange={(e) => setMakingSilver(e.currentTarget.value)}
               />
             </div>
-            <div className="grid-2" style={{ marginTop: "16px", marginBottom: "24px" }}>
+            <div className="grid-2" style={{ marginTop: "16px" }}>
               <s-text-field
                 name="making_charge_discount"
                 label="Making Charge Discount (%)"
@@ -1861,12 +1868,22 @@ export default function PricingDashboard() {
                 onChange={(e) => setMakingChargeDiscountPercentage(e.currentTarget.value)}
               />
               <s-text-field
+                name="diamond_discount"
+                label="Diamond Price Discount (%)"
+                type="number"
+                value={diamondDiscountPercentage}
+                onChange={(e) => setDiamondDiscountPercentage(e.currentTarget.value)}
+              />
+            </div>
+            <div className="grid-2" style={{ marginTop: "16px", marginBottom: "24px" }}>
+              <s-text-field
                 name="gst"
                 label="GST Percentage (%)"
                 type="number"
                 value={gst}
                 onChange={(e) => setGst(e.currentTarget.value)}
               />
+              <div />
             </div>
             <s-button onClick={handleSaveRates} variant="primary" {...(isSubmitting ? { loading: true } : {})}>
               Save Rates Settings
@@ -2384,7 +2401,7 @@ export default function PricingDashboard() {
                   </div>
                   <div className="preview-summary-item">
                     <span className="preview-summary-label">
-                      Diamond (All) {config.making_charge_discount_percentage > 0 ? `(-${Number(config.making_charge_discount_percentage)}%)` : ""}
+                      Diamond (All) {config.diamond_discount_percentage > 0 ? `(-${Number(config.diamond_discount_percentage)}%)` : ""}
                     </span>
                     <span className="preview-summary-value" style={{ fontSize: "13px", color: "#5b21b6" }}>{fmt(totals.diamond)}</span>
                   </div>
@@ -2414,7 +2431,7 @@ export default function PricingDashboard() {
                       <th>Metal Cost</th>
                       <th>Making {config.making_charge_discount_percentage > 0 ? `(-${Number(config.making_charge_discount_percentage)}%)` : ""}</th>
                       <th>Diamonds</th>
-                      <th>Diamond Cost {config.making_charge_discount_percentage > 0 ? `(-${Number(config.making_charge_discount_percentage)}%)` : ""}</th>
+                      <th>Diamond Cost {config.diamond_discount_percentage > 0 ? `(-${Number(config.diamond_discount_percentage)}%)` : ""}</th>
                       <th>Subtotal</th>
                       <th>GST ({config.gst_percentage}%)</th>
                       <th style={{ minWidth: "120px" }}>Final Price</th>
