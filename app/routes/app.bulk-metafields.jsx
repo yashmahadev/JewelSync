@@ -300,6 +300,7 @@ export default function BulkMetafields() {
       "total_price", "gst", "making_charges", "diamond_price", "gold_price", 
       "gold_weight", "diamond_weight", "total_weight", "gold_title", "diamond_title", 
       "variant_info", "gold_label", "diamond_label", "making_label", "gst_label",
+      "making_discount", "diamond_discount",
       "diamond_details", "diamond_row_1_type", "diamond_row_1_shape", "diamond_row_1_count", "diamond_row_1_total_wt",
       "diamond_row_2_type", "diamond_row_2_shape", "diamond_row_2_count", "diamond_row_2_total_wt",
       "diamond_row_3_type", "diamond_row_3_shape", "diamond_row_3_count", "diamond_row_3_total_wt"
