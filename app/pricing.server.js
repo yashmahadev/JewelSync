@@ -796,42 +796,117 @@ export async function ensureMetafieldDefinitions(graphqlClient) {
     },
   ];
 
-  for (const def of definitions) {
-    try {
-      const response = await callGraphQLWithRetry(
-        graphqlClient,
-        `#graphql
-        mutation metafieldDefinitionCreate($definition: MetafieldDefinitionInput!) {
-          metafieldDefinitionCreate(definition: $definition) {
-            createdDefinition {
+  // Fetch existing definitions to see if they need updating
+  let existingDefinitions = [];
+  try {
+    const fetchResponse = await callGraphQLWithRetry(
+      graphqlClient,
+      `#graphql
+      query getMetafieldDefinitions {
+        metafieldDefinitions(first: 100, ownerType: PRODUCTVARIANT) {
+          edges {
+            node {
               id
-            }
-            userErrors {
-              field
-              message
-              code
+              namespace
+              key
+              name
             }
           }
-        }`,
-        {
-          variables: { definition: def },
         }
-      );
-      const res = await response.json();
-      const errors = res.data?.metafieldDefinitionCreate?.userErrors || [];
-      if (errors.length > 0) {
-        // Ignore if already exists (TAKEN)
-        const isAlreadyExists = errors.some(
-          (e) => e.code === "TAKEN" || e.message.includes("taken") || e.message.includes("already exists")
-        );
-        if (!isAlreadyExists) {
-          console.warn(`Could not create metafield definition for ${def.key}:`, errors);
+      }`
+    );
+    const fetchRes = await fetchResponse.json();
+    existingDefinitions = fetchRes.data?.metafieldDefinitions?.edges?.map(e => e.node) || [];
+  } catch (err) {
+    console.error("Failed to fetch existing metafield definitions:", err);
+  }
+
+  const existingMap = new Map();
+  for (const d of existingDefinitions) {
+    existingMap.set(`${d.namespace}.${d.key}`, d);
+  }
+
+  for (const def of definitions) {
+    const fullKey = `${def.namespace}.${def.key}`;
+    const existing = existingMap.get(fullKey);
+
+    if (existing) {
+      // If definition exists, check if name matches
+      if (existing.name !== def.name) {
+        console.log(`Updating definition name for ${fullKey}: "${existing.name}" -> "${def.name}"`);
+        try {
+          const updateResponse = await callGraphQLWithRetry(
+            graphqlClient,
+            `#graphql
+            mutation metafieldDefinitionUpdate($definitionId: ID!, $definition: MetafieldDefinitionUpdateInput!) {
+              metafieldDefinitionUpdate(definitionId: $definitionId, definition: $definition) {
+                updatedDefinition {
+                  id
+                  name
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }`,
+            {
+              variables: {
+                definitionId: existing.id,
+                definition: {
+                  name: def.name,
+                },
+              },
+            }
+          );
+          const updateRes = await updateResponse.json();
+          const errors = updateRes.data?.metafieldDefinitionUpdate?.userErrors || [];
+          if (errors.length > 0) {
+            console.warn(`Could not update definition name for ${fullKey}:`, errors);
+          } else {
+            console.log(`✅ Updated definition name for ${fullKey} to "${def.name}"`);
+          }
+        } catch (err) {
+          console.error(`Error updating metafield definition for ${fullKey}:`, err);
         }
-      } else {
-        console.log(`✅ Created metafield definition for ${def.key}`);
       }
-    } catch (err) {
-      console.error(`Error ensuring metafield definition for ${def.key}:`, err);
+    } else {
+      // Create new definition
+      try {
+        const response = await callGraphQLWithRetry(
+          graphqlClient,
+          `#graphql
+          mutation metafieldDefinitionCreate($definition: MetafieldDefinitionInput!) {
+            metafieldDefinitionCreate(definition: $definition) {
+              createdDefinition {
+                id
+              }
+              userErrors {
+                field
+                message
+                code
+              }
+            }
+          }`,
+          {
+            variables: { definition: def },
+          }
+        );
+        const res = await response.json();
+        const errors = res.data?.metafieldDefinitionCreate?.userErrors || [];
+        if (errors.length > 0) {
+          const isAlreadyExists = errors.some(
+            (e) => e.code === "TAKEN" || e.message.includes("taken") || e.message.includes("already exists")
+          );
+          if (!isAlreadyExists) {
+            console.warn(`Could not create metafield definition for ${def.key}:`, errors);
+          }
+        } else {
+          console.log(`✅ Created metafield definition for ${def.key}`);
+        }
+      } catch (err) {
+        console.error(`Error ensuring metafield definition for ${def.key}:`, err);
+      }
     }
   }
 }
