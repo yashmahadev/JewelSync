@@ -516,68 +516,6 @@ Diamond Cost:
   Carat Wt × Price/Carat
   (from Diamond Grid lookup)`}</div>
           </div>
-
-          {/* Test Data Generator */}
-          <div className="sidebar-card">
-            <h3 className="sidebar-card-title">🧪 Create Test Products</h3>
-            <p style={{ margin: "0 0 16px 0", fontSize: "13px", color: "#6d7175", lineHeight: "1.5" }}>
-              Click below to generate <strong>5 sample jewelry ring products</strong> with realistic SKUs (<code>CAD-237</code> to <code>CAD-248</code>) and full variant combinations:
-              <br /><br />
-              <strong>3 Gold Purities</strong> (9K, 14K, 18K) ×<br />
-              <strong>4 Ring Sizes</strong> (12, 14, 16, 18)<br />
-              = <strong>12 variants per product</strong>
-            </p>
-            <fetcher.Form method="post">
-              <s-button
-                type="submit"
-                variant="primary"
-                {...(isCreating ? { loading: true } : {})}
-              >
-                {isCreating ? "Creating products..." : "Create 5 Test Products"}
-              </s-button>
-            </fetcher.Form>
-
-            {/* Results */}
-            {result && (
-              <div style={{ marginTop: "16px" }}>
-                {result.created?.length > 0 && (
-                  <>
-                    <p style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: 600, color: "#155724" }}>
-                      ✅ {result.created.length} Products Created:
-                    </p>
-                    <table className="result-table">
-                      <thead>
-                        <tr>
-                          <th>SKU</th>
-                          <th>Variants</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {result.created.map((p) => (
-                          <tr key={p.sku}>
-                            <td><code>{p.sku}</code></td>
-                            <td><span className="badge-success">{p.variantCount} variants</span></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </>
-                )}
-                {result.failed?.length > 0 && (
-                  <div style={{ marginTop: "12px" }}>
-                    <p style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: 600, color: "#721c24" }}>
-                      ⚠️ {result.failed.length} Products Failed:
-                    </p>
-                    {result.failed.map((f) => (
-                      <p key={f.sku} style={{ fontSize: "12px", margin: "4px 0", color: "#721c24" }}>
-                        <code>{f.sku}</code>: {f.error}
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
         </div>
       </div>
     </s-page>
