@@ -44,8 +44,9 @@ const SAMPLE_PRODUCTS = [
   },
 ];
 
-const GOLD_PURITIES = ["9K", "14K", "18K"];
-const RING_SIZES = ["12", "14", "16", "18"];
+const GOLD_PURITIES = process.env.DEMO_GOLD_PURITIES ? process.env.DEMO_GOLD_PURITIES.split(",") : ["9K", "14K", "18K"];
+const RING_SIZES = process.env.DEMO_RING_SIZES ? process.env.DEMO_RING_SIZES.split(",") : ["12", "14", "16", "18"];
+
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);

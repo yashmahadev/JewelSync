@@ -5,7 +5,10 @@ import { createAuditLog, updateAuditLog } from "./audit.server";
 /**
  * Helper to call Shopify GraphQL with exponential backoff retry for throttling.
  */
-async function callGraphQLWithRetry(graphqlClient, query, variables, retries = 5, delay = 1000) {
+const SHOPIFY_MAX_RETRIES = process.env.SHOPIFY_MAX_RETRIES ? Number(process.env.SHOPIFY_MAX_RETRIES) : 5;
+const SHOPIFY_RETRY_DELAY_MS = process.env.SHOPIFY_RETRY_DELAY_MS ? Number(process.env.SHOPIFY_RETRY_DELAY_MS) : 1000;
+
+async function callGraphQLWithRetry(graphqlClient, query, variables, retries = SHOPIFY_MAX_RETRIES, delay = SHOPIFY_RETRY_DELAY_MS) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const response = await graphqlClient(query, variables);
@@ -47,8 +50,15 @@ async function callGraphQLWithRetry(graphqlClient, query, variables, retries = 5
                           errMsg.toLowerCase().includes("429") ||
                           errMsg.toLowerCase().includes("rate limit");
       
-      if (isThrottled && attempt < retries) {
-        console.warn(`[Shopify API] Caught Throttled error: "${errMsg}". Retrying attempt ${attempt}/${retries} after ${delay}ms...`);
+      const isTransientNetworkError = 
+        errMsg.toLowerCase().includes("fetch failed") ||
+        errMsg.toLowerCase().includes("econnreset") ||
+        errMsg.toLowerCase().includes("etimedout") ||
+        errMsg.toLowerCase().includes("socket") ||
+        errMsg.toLowerCase().includes("network");
+
+      if ((isThrottled || isTransientNetworkError) && attempt < retries) {
+        console.warn(`[Shopify API] Caught transient/throttled error: "${errMsg}". Retrying attempt ${attempt}/${retries} after ${delay}ms...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         delay *= 2.5;
         continue;
@@ -57,7 +67,7 @@ async function callGraphQLWithRetry(graphqlClient, query, variables, retries = 5
       throw err;
     }
   }
-  throw new Error("Shopify GraphQL request failed after maximum retries due to throttling.");
+  throw new Error("Shopify GraphQL request failed after maximum retries.");
 }
 
 /**
@@ -566,6 +576,9 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
     }
   }
 
+  const targetNamespace = process.env.SHOPIFY_METAFIELD_NAMESPACE || "custom";
+  const mappedMetafields = metafields.map((m) => ({ ...m, namespace: targetNamespace }));
+
   return {
     metalCost,
     makingCharge,
@@ -577,7 +590,7 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
     adjustedWeight,
     weightAdded,
     goldPrice: variant.metal_type === "gold" ? metalCost : 0,
-    metafields,
+    metafields: mappedMetafields,
     diamondDetails,
     totalDiamondCarats,
   };
@@ -587,6 +600,7 @@ export async function calculatePrice(shop, variant, productInfo = {}) {
  * Programmatically ensures that custom metafield definitions exist for variants in Shopify.
  */
 export async function ensureMetafieldDefinitions(graphqlClient) {
+  const targetNamespace = process.env.SHOPIFY_METAFIELD_NAMESPACE || "custom";
   const definitions = [
     {
       name: "Metal Type",
@@ -854,7 +868,7 @@ export async function ensureMetafieldDefinitions(graphqlClient) {
       type: "number_decimal",
       ownerType: "PRODUCTVARIANT",
     },
-  ];
+  ].map((d) => ({ ...d, namespace: targetNamespace }));
 
   // Fetch existing definitions to see if they need updating
   let existingDefinitions = [];
@@ -898,8 +912,8 @@ export async function ensureMetafieldDefinitions(graphqlClient) {
           const updateResponse = await callGraphQLWithRetry(
             graphqlClient,
             `#graphql
-            mutation metafieldDefinitionUpdate($definitionId: ID!, $definition: MetafieldDefinitionUpdateInput!) {
-              metafieldDefinitionUpdate(definitionId: $definitionId, definition: $definition) {
+            mutation metafieldDefinitionUpdate($definition: MetafieldDefinitionUpdateInput!) {
+              metafieldDefinitionUpdate(definition: $definition) {
                 updatedDefinition {
                   id
                   name
@@ -912,8 +926,10 @@ export async function ensureMetafieldDefinitions(graphqlClient) {
             }`,
             {
               variables: {
-                definitionId: existing.id,
                 definition: {
+                  ownerType: def.ownerType,
+                  namespace: def.namespace,
+                  key: def.key,
                   name: def.name,
                 },
               },
@@ -1287,8 +1303,9 @@ export async function runBackgroundSync(shop, jobId) {
           // Check if variant has custom metafields configured on Shopify
           const mEdges = v.metafields?.edges || [];
           const mFields = {};
+          const targetNamespace = process.env.SHOPIFY_METAFIELD_NAMESPACE || "custom";
           mEdges.forEach((mEdge) => {
-            if (mEdge.node.namespace === "custom") {
+            if (mEdge.node.namespace === targetNamespace) {
               mFields[mEdge.node.key] = mEdge.node.value;
             }
           });

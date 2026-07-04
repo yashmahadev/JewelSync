@@ -1,10 +1,11 @@
-import { useLoaderData, useSubmit, useActionData, Form, useNavigation } from "react-router";
+import { useLoaderData, useSubmit, useActionData, Form, useNavigation, useSearchParams } from "react-router";
 import { useEffect, useState } from "react";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { createAuditLog, updateAuditLog } from "../audit.server";
-import { runBackgroundSync, syncProductVariantPrices } from "../pricing.server";
+import { enqueuePricingSync } from "../pricingQueue.server";
+
 
 export const loader = async ({ request }) => {
   const { session, admin } = await authenticate.admin(request);
@@ -19,16 +20,16 @@ export const loader = async ({ request }) => {
     config = await prisma.storeConfig.create({
       data: {
         shop,
-        gold_rate_9k: 4000.00,
-        gold_rate_14k: 4800.00,
-        gold_rate_18k: 5500.00,
-        gold_rate_22k: 6500.00,
-        silver_rate: 110.00,
-        making_charge_gold: 500.00,
-        making_charge_silver: 50.00,
-        making_charge_discount_percentage: 0.00,
-        diamond_discount_percentage: 0.00,
-        gst_percentage: 3.00,
+        gold_rate_9k: process.env.DEFAULT_GOLD_RATE_9K ? Number(process.env.DEFAULT_GOLD_RATE_9K) : 4000.00,
+        gold_rate_14k: process.env.DEFAULT_GOLD_RATE_14K ? Number(process.env.DEFAULT_GOLD_RATE_14K) : 4800.00,
+        gold_rate_18k: process.env.DEFAULT_GOLD_RATE_18K ? Number(process.env.DEFAULT_GOLD_RATE_18K) : 5500.00,
+        gold_rate_22k: process.env.DEFAULT_GOLD_RATE_22K ? Number(process.env.DEFAULT_GOLD_RATE_22K) : 6500.00,
+        silver_rate: process.env.DEFAULT_SILVER_RATE ? Number(process.env.DEFAULT_SILVER_RATE) : 110.00,
+        making_charge_gold: process.env.DEFAULT_MAKING_CHARGE_GOLD ? Number(process.env.DEFAULT_MAKING_CHARGE_GOLD) : 500.00,
+        making_charge_silver: process.env.DEFAULT_MAKING_CHARGE_SILVER ? Number(process.env.DEFAULT_MAKING_CHARGE_SILVER) : 50.00,
+        making_charge_discount_percentage: process.env.DEFAULT_MAKING_CHARGE_DISCOUNT ? Number(process.env.DEFAULT_MAKING_CHARGE_DISCOUNT) : 0.00,
+        diamond_discount_percentage: process.env.DEFAULT_DIAMOND_DISCOUNT ? Number(process.env.DEFAULT_DIAMOND_DISCOUNT) : 0.00,
+        gst_percentage: process.env.DEFAULT_GST_PERCENTAGE ? Number(process.env.DEFAULT_GST_PERCENTAGE) : 3.00,
       },
     });
   }
@@ -229,8 +230,9 @@ export const loader = async ({ request }) => {
       } else {
         const mEdges = v.metafields?.edges || [];
         const mFields = {};
+        const targetNamespace = process.env.SHOPIFY_METAFIELD_NAMESPACE || "custom";
         mEdges.forEach((mEdge) => {
-          if (mEdge.node.namespace === "custom") {
+          if (mEdge.node.namespace === targetNamespace) {
             mFields[mEdge.node.key] = mEdge.node.value;
           }
         });
@@ -643,10 +645,9 @@ export const action = async ({ request }) => {
         },
       });
 
-      // Execute asynchronously in background
-      runBackgroundSync(shop, newJob.id).catch((err) => {
-        console.error(`[DashboardSync] Async runBackgroundSync error:`, err);
-      });
+      // Queue the sync job asynchronously via BullMQ + Redis
+      await enqueuePricingSync(shop, newJob.id);
+
 
       await updateAuditLog(logId, "success", { message: "Background price recalculation and sync started!", jobId: newJob.id });
       return {
@@ -681,6 +682,7 @@ export default function PricingDashboard() {
   const submit = useSubmit();
   const shopify = useAppBridge();
   const navigation = useNavigation();
+  const [searchParams] = useSearchParams();
 
   // Local state for daily settings
   const [gold9k, setGold9k] = useState(config.gold_rate_9k);
@@ -820,11 +822,14 @@ export default function PricingDashboard() {
     if (!isSyncActive) return;
 
     const interval = setInterval(() => {
-      submit({ q: searchVal, poll: "true" }, { method: "GET", replace: true });
+      const params = new URLSearchParams(searchParams);
+      params.set("q", searchVal);
+      params.set("poll", "true");
+      submit(params, { method: "GET", replace: true });
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [isSyncActive, submit, searchVal]);
+  }, [isSyncActive, submit, searchVal, searchParams]);
 
 
 
@@ -1022,16 +1027,24 @@ export default function PricingDashboard() {
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
-    submit({ q: searchVal }, { method: "GET", replace: true });
+    const params = new URLSearchParams(searchParams);
+    params.set("q", searchVal);
+    params.delete("before");
+    params.delete("after");
+    submit(params, { method: "GET", replace: true });
   };
 
   const handlePageChange = (direction, cursor) => {
-    const params = {};
-    if (searchQ) params.q = searchQ;
+    const params = new URLSearchParams(searchParams);
+    if (searchQ) params.set("q", searchQ);
+    else params.delete("q");
+    
     if (direction === "before") {
-      params.before = cursor;
+      params.set("before", cursor);
+      params.delete("after");
     } else {
-      params.after = cursor;
+      params.set("after", cursor);
+      params.delete("before");
     }
     submit(params, { method: "GET", replace: true });
   };

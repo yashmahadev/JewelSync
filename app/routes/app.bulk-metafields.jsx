@@ -1,4 +1,4 @@
-import { useLoaderData, useSubmit, useActionData, Form, useNavigation } from "react-router";
+import { useLoaderData, useSubmit, useActionData, Form, useNavigation, useSearchParams } from "react-router";
 import { useState, useEffect } from "react";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -235,6 +235,7 @@ export default function BulkMetafields() {
   const submit = useSubmit();
   const shopify = useAppBridge();
   const navigation = useNavigation();
+  const [searchParams] = useSearchParams();
   const isSaving = navigation.state === "submitting" && navigation.formData?.get("actionType") === "save_metafields";
 
   const [searchVal, setSearchVal] = useState(searchQ);
@@ -286,12 +287,20 @@ export default function BulkMetafields() {
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
-    submit({ q: searchVal, productId: selectedProductId }, { method: "GET", replace: true });
+    const params = new URLSearchParams(searchParams);
+    params.set("q", searchVal);
+    if (selectedProductId) params.set("productId", selectedProductId);
+    else params.delete("productId");
+    submit(params, { method: "GET", replace: true });
   };
 
   const handleProductSelectChange = (e) => {
     const pId = e.target.value;
-    submit({ q: searchVal, productId: pId }, { method: "GET", replace: true });
+    const params = new URLSearchParams(searchParams);
+    params.set("productId", pId);
+    if (searchVal) params.set("q", searchVal);
+    else params.delete("q");
+    submit(params, { method: "GET", replace: true });
   };
 
   // Check if a metafield key belongs to our autocalculated pricing engine keys

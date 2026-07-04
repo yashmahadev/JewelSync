@@ -23,8 +23,8 @@ if (host === "localhost") {
   hmrConfig = {
     protocol: "ws",
     host: "localhost",
-    port: 64999,
-    clientPort: 64999,
+    port: process.env.HMR_PORT ? parseInt(process.env.HMR_PORT) : 64999,
+    clientPort: process.env.HMR_PORT ? parseInt(process.env.HMR_PORT) : 64999,
   };
 } else {
   hmrConfig = {
