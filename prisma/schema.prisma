@@ -144,4 +144,23 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+model DynamicDiamondShape {
+  id    Int    @id @default(autoincrement())
+  shop  String @db.VarChar(255)
+  name  String @db.VarChar(50)
+  
+  @@unique([shop, name])
+  @@index([shop])
+}
+
+model DynamicDiamondType {
+  id    Int    @id @default(autoincrement())
+  shop  String @db.VarChar(255)
+  name  String @db.VarChar(50)
+
+  @@unique([shop, name])
+  @@index([shop])
+}
+
+
 

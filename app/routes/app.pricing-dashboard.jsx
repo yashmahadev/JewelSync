@@ -397,6 +397,52 @@ export const loader = async ({ request }) => {
     orderBy: { created_at: "desc" },
   });
 
+  // Query dynamic shapes & types, seed defaults if empty
+  let dynamicShapes = await prisma.dynamicDiamondShape.findMany({
+    where: { shop },
+    orderBy: { name: "asc" }
+  });
+
+  if (dynamicShapes.length === 0) {
+    const defaultShapes = [
+      "Asscher", "Baguette", "Briolette", "Bullets", "Calf", "Cushion",
+      "Cushion Brilliant", "Cushion Modified", "Emerald", "European Cut",
+      "Flanders", "Half Moon", "Heart", "Hexagonal", "Kite", "Lozenge",
+      "Marquise", "Octagonal", "Old Miner", "Oval", "Pear", "Pears",
+      "Pentagonal", "Polki", "Princess", "Radiant", "Rose", "Round",
+      "Shield", "Single Cut", "Square", "Square Emerald", "Square Radiant",
+      "Star", "Tabered Baguette", "Tapered Bullet", "Trapezoid", "Triangle",
+      "Trilliant", "Other"
+    ];
+    await prisma.dynamicDiamondShape.createMany({
+      data: defaultShapes.map(name => ({ shop, name })),
+      skipDuplicates: true
+    });
+    dynamicShapes = await prisma.dynamicDiamondShape.findMany({
+      where: { shop },
+      orderBy: { name: "asc" }
+    });
+  }
+
+  let dynamicTypes = await prisma.dynamicDiamondType.findMany({
+    where: { shop },
+    orderBy: { name: "asc" }
+  });
+
+  if (dynamicTypes.length === 0) {
+    const defaultTypes = [
+      "Solitaire", "Small Diamond", "Accent Diamond", "Halo Diamond", "Side Diamond"
+    ];
+    await prisma.dynamicDiamondType.createMany({
+      data: defaultTypes.map(name => ({ shop, name })),
+      skipDuplicates: true
+    });
+    dynamicTypes = await prisma.dynamicDiamondType.findMany({
+      where: { shop },
+      orderBy: { name: "asc" }
+    });
+  }
+
   return {
     config: serializedConfig,
     variantCount,
@@ -408,6 +454,8 @@ export const loader = async ({ request }) => {
     uniqueColors,
     uniqueClarities,
     allDiamondRates,
+    dynamicShapes: dynamicShapes.map(s => ({ id: s.id, name: s.name })),
+    dynamicTypes: dynamicTypes.map(t => ({ id: t.id, name: t.name })),
     latestJob: latestJob ? {
       id: latestJob.id,
       status: latestJob.status,
@@ -673,11 +721,71 @@ export const action = async ({ request }) => {
     }
   }
 
+  if (actionType === "add_diamond_shape") {
+    const shapeName = formData.get("shapeName")?.toString().trim();
+    if (!shapeName) {
+      return { success: false, error: "Shape name is required." };
+    }
+    try {
+      await prisma.dynamicDiamondShape.create({
+        data: { shop, name: shapeName }
+      });
+      return { success: true, message: `Shape "${shapeName}" added successfully!` };
+    } catch (err) {
+      console.error("Add diamond shape error:", err);
+      return { success: false, error: err.message.includes("Unique") ? "This shape already exists." : err.message };
+    }
+  }
+
+  if (actionType === "delete_diamond_shape") {
+    const shapeId = Number(formData.get("shapeId"));
+    try {
+      await prisma.dynamicDiamondShape.delete({
+        where: { id: shapeId, shop }
+      });
+      return { success: true, message: "Shape deleted successfully!" };
+    } catch (err) {
+      console.error("Delete diamond shape error:", err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  if (actionType === "add_diamond_type") {
+    const typeName = formData.get("typeName")?.toString().trim();
+    if (!typeName) {
+      return { success: false, error: "Type name is required." };
+    }
+    try {
+      await prisma.dynamicDiamondType.create({
+        data: { shop, name: typeName }
+      });
+      return { success: true, message: `Type "${typeName}" added successfully!` };
+    } catch (err) {
+      console.error("Add diamond type error:", err);
+      return { success: false, error: err.message.includes("Unique") ? "This type already exists." : err.message };
+    }
+  }
+
+  if (actionType === "delete_diamond_type") {
+    const typeId = Number(formData.get("typeId"));
+    try {
+      await prisma.dynamicDiamondType.delete({
+        where: { id: typeId, shop }
+      });
+      return { success: true, message: "Type deleted successfully!" };
+    } catch (err) {
+      console.error("Delete diamond type error:", err);
+      return { success: false, error: err.message };
+    }
+  }
+
   return null;
 };
 
 export default function PricingDashboard() {
-  const { config, variantCount, products, pageInfo, savedConfigsMap, savedRulesMap, searchQ, uniqueColors, uniqueClarities, allDiamondRates, latestJob } = useLoaderData();
+  const { config, variantCount, products, pageInfo, savedConfigsMap, savedRulesMap, searchQ, uniqueColors, uniqueClarities, allDiamondRates, latestJob, dynamicShapes, dynamicTypes } = useLoaderData();
+  const DIAMOND_TYPES = dynamicTypes.map(t => t.name);
+  const DIAMOND_SHAPES = dynamicShapes.map(s => s.name);
   const actionData = useActionData();
   const submit = useSubmit();
   const shopify = useAppBridge();
@@ -686,6 +794,44 @@ export default function PricingDashboard() {
 
   // Local state for daily settings
   const [gold9k, setGold9k] = useState(config.gold_rate_9k);
+  const [newShapeName, setNewShapeName] = useState("");
+  const [newTypeName, setNewTypeName] = useState("");
+
+  const handleAddShape = (e) => {
+    e.preventDefault();
+    if (!newShapeName.trim()) return;
+    const formData = new FormData();
+    formData.append("actionType", "add_diamond_shape");
+    formData.append("shapeName", newShapeName.trim());
+    submit(formData, { method: "post" });
+    setNewShapeName("");
+  };
+
+  const handleDeleteShape = (id) => {
+    if (!confirm("Are you sure you want to delete this shape?")) return;
+    const formData = new FormData();
+    formData.append("actionType", "delete_diamond_shape");
+    formData.append("shapeId", id.toString());
+    submit(formData, { method: "post" });
+  };
+
+  const handleAddType = (e) => {
+    e.preventDefault();
+    if (!newTypeName.trim()) return;
+    const formData = new FormData();
+    formData.append("actionType", "add_diamond_type");
+    formData.append("typeName", newTypeName.trim());
+    submit(formData, { method: "post" });
+    setNewTypeName("");
+  };
+
+  const handleDeleteType = (id) => {
+    if (!confirm("Are you sure you want to delete this type?")) return;
+    const formData = new FormData();
+    formData.append("actionType", "delete_diamond_type");
+    formData.append("typeId", id.toString());
+    submit(formData, { method: "post" });
+  };
   const [gold14k, setGold14k] = useState(config.gold_rate_14k);
   const [gold18k, setGold18k] = useState(config.gold_rate_18k);
   const [gold22k, setGold22k] = useState(config.gold_rate_22k);
@@ -1903,6 +2049,114 @@ export default function PricingDashboard() {
             </s-button>
           </div>
 
+          {/* Diamond Configuration CRUD */}
+          <div className="form-card">
+            <h2 className="form-card-title">💎 Diamond Attribute Manager (CRUD)</h2>
+            <div className="grid-2" style={{ gap: "24px" }}>
+              {/* Types Column */}
+              <div>
+                <h3 style={{ fontSize: "14px", fontWeight: "600", marginBottom: "12px", color: "#333" }}>Diamond Types</h3>
+                
+                {/* Add Type Form */}
+                <form onSubmit={handleAddType} style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+                  <input
+                    type="text"
+                    placeholder="Enter type (e.g. Accent)..."
+                    value={newTypeName}
+                    onChange={(e) => setNewTypeName(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: "8px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #ccc",
+                      fontSize: "12px",
+                      outline: "none"
+                    }}
+                  />
+                  <s-button type="submit" variant="primary">Add</s-button>
+                </form>
+
+                {/* Types List */}
+                <div style={{ maxHeight: "250px", overflowY: "auto", border: "1px solid #eee", borderRadius: "6px", padding: "8px" }}>
+                  {dynamicTypes.length === 0 ? (
+                    <div style={{ padding: "8px", color: "#888", fontSize: "12px" }}>No types configured</div>
+                  ) : (
+                    dynamicTypes.map((t) => (
+                      <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 8px", borderBottom: "1px solid #f9f9f9" }}>
+                        <span style={{ fontSize: "13px" }}>{t.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteType(t.id)}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "#d32f2f",
+                            cursor: "pointer",
+                            fontSize: "12px",
+                            padding: "4px"
+                          }}
+                        >
+                          ❌
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Shapes Column */}
+              <div>
+                <h3 style={{ fontSize: "14px", fontWeight: "600", marginBottom: "12px", color: "#333" }}>Diamond Shapes</h3>
+                
+                {/* Add Shape Form */}
+                <form onSubmit={handleAddShape} style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+                  <input
+                    type="text"
+                    placeholder="Enter shape (e.g. Trillion)..."
+                    value={newShapeName}
+                    onChange={(e) => setNewShapeName(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: "8px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #ccc",
+                      fontSize: "12px",
+                      outline: "none"
+                    }}
+                  />
+                  <s-button type="submit" variant="primary">Add</s-button>
+                </form>
+
+                {/* Shapes List */}
+                <div style={{ maxHeight: "250px", overflowY: "auto", border: "1px solid #eee", borderRadius: "6px", padding: "8px" }}>
+                  {dynamicShapes.length === 0 ? (
+                    <div style={{ padding: "8px", color: "#888", fontSize: "12px" }}>No shapes configured</div>
+                  ) : (
+                    dynamicShapes.map((s) => (
+                      <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 8px", borderBottom: "1px solid #f9f9f9" }}>
+                        <span style={{ fontSize: "13px" }}>{s.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteShape(s.id)}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "#d32f2f",
+                            cursor: "pointer",
+                            fontSize: "12px",
+                            padding: "4px"
+                          }}
+                        >
+                          ❌
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Product Specifications Manager */}
           <div className="form-card">
             <h2 className="form-card-title">📐 Configure Product Specifications</h2>
@@ -2577,11 +2831,11 @@ export default function PricingDashboard() {
                           value={d.diamond_type || "Small Diamond"}
                           onChange={(e) => updateModalDiamondRow(index, "diamond_type", e.target.value)}
                         >
-                          <option value="Solitaire">Solitaire</option>
-                          <option value="Small Diamond">Small Diamond</option>
-                          <option value="Accent Diamond">Accent Diamond</option>
-                          <option value="Halo Diamond">Halo Diamond</option>
-                          <option value="Side Diamond">Side Diamond</option>
+                          {DIAMOND_TYPES.map((type) => (
+                            <option key={type} value={type}>
+                              {type}
+                            </option>
+                          ))}
                         </select>
                       </td>
                       <td>
@@ -2590,46 +2844,11 @@ export default function PricingDashboard() {
                           value={d.shape || "Round"}
                           onChange={(e) => updateModalDiamondRow(index, "shape", e.target.value)}
                         >
-                          <option value="Square Emerald">Square Emerald</option>
-                          <option value="Tapered Bullet">Tapered Bullet</option>
-                          <option value="Calf">Calf</option>
-                          <option value="Briolette">Briolette</option>
-                          <option value="Bullets">Bullets</option>
-                          <option value="Cushion Brilliant">Cushion Brilliant</option>
-                          <option value="Cushion Modified">Cushion Modified</option>
-                          <option value="European Cut">European Cut</option>
-                          <option value="Flanders">Flanders</option>
-                          <option value="Half Moon">Half Moon</option>
-                          <option value="Hexagonal">Hexagonal</option>
-                          <option value="Kite">Kite</option>
-                          <option value="Lozenge">Lozenge</option>
-                          <option value="Octagonal">Octagonal</option>
-                          <option value="Old Miner">Old Miner</option>
-                          <option value="Pentagonal">Pentagonal</option>
-                          <option value="Square Radiant">Square Radiant</option>
-                          <option value="Shield">Shield</option>
-                          <option value="Square">Square</option>
-                          <option value="Star">Star</option>
-                          <option value="Trapezoid">Trapezoid</option>
-                          <option value="Other">Other</option>
-                          <option value="Polki">Polki</option>
-                          <option value="Heart">Heart</option>
-                          <option value="Cushion">Cushion</option>
-                          <option value="Asscher">Asscher</option>
-                          <option value="Single Cut">Single Cut</option>
-                          <option value="Radiant">Radiant</option>
-                          <option value="Rose">Rose</option>
-                          <option value="Triangle">Triangle</option>
-                          <option value="Trilliant">Trilliant</option>
-                          <option value="Round">Round</option>
-                          <option value="Pears">Pears</option>
-                          <option value="Marquise">Marquise</option>
-                          <option value="Pear">Pear</option>
-                          <option value="Princess">Princess</option>
-                          <option value="Emerald">Emerald</option>
-                          <option value="Oval">Oval</option>
-                          <option value="Baguette">Baguette</option>
-                          <option value="Tabered Baguette">Tabered Baguette</option>
+                          {DIAMOND_SHAPES.map((shape) => (
+                            <option key={shape} value={shape}>
+                              {shape}
+                            </option>
+                          ))}
                         </select>
                       </td>
                       <td>
