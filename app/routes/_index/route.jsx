@@ -1,9 +1,19 @@
 import { redirect, Form, useLoaderData } from "react-router";
-import { login } from "../../shopify.server";
+import { login, authenticate } from "../../shopify.server";
 import styles from "./styles.module.css";
 
 export const loader = async ({ request }) => {
   const url = new URL(request.url);
+
+  // If already authenticated with Shopify, redirect to the app homepage (/app)
+  try {
+    const { session } = await authenticate.admin(request);
+    if (session) {
+      return redirect(`/app?${url.searchParams.toString()}`);
+    }
+  } catch (error) {
+    // Quietly catch authentication errors for non-logged in or external visits
+  }
 
   if (url.searchParams.get("shop")) {
     throw redirect(`/app?${url.searchParams.toString()}`);

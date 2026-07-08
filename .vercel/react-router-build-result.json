@@ -19,6 +19,7 @@
       "routes/_index": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
       "routes/app.pricing-dashboard": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
       "routes/app.bulk-metafields": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/app.diamond-config": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
       "routes/app.diamond-rates": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
       "routes/app._index": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0"
     },
@@ -113,6 +114,15 @@
         "parentId": "routes/app",
         "file": "app/routes/app.bulk-metafields.jsx",
         "path": "bulk-metafields",
+        "config": {
+          "runtime": "nodejs"
+        }
+      },
+      "routes/app.diamond-config": {
+        "id": "routes/app.diamond-config",
+        "parentId": "routes/app",
+        "file": "app/routes/app.diamond-config.jsx",
+        "path": "diamond-config",
         "config": {
           "runtime": "nodejs"
         }
@@ -216,6 +226,12 @@
         "file": "routes/app.bulk-metafields.jsx",
         "path": "bulk-metafields"
       },
+      "routes/app.diamond-config": {
+        "id": "routes/app.diamond-config",
+        "parentId": "routes/app",
+        "file": "routes/app.diamond-config.jsx",
+        "path": "diamond-config"
+      },
       "routes/app.diamond-rates": {
         "id": "routes/app.diamond-rates",
         "parentId": "routes/app",
@@ -293,6 +309,11 @@
                 "id": "routes/app.bulk-metafields",
                 "file": "routes/app.bulk-metafields.jsx",
                 "path": "bulk-metafields"
+              },
+              {
+                "id": "routes/app.diamond-config",
+                "file": "routes/app.diamond-config.jsx",
+                "path": "diamond-config"
               },
               {
                 "id": "routes/app.diamond-rates",
