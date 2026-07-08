@@ -2577,16 +2577,46 @@ export default function PricingDashboard() {
                           value={d.shape || "Round"}
                           onChange={(e) => updateModalDiamondRow(index, "shape", e.target.value)}
                         >
-                          <option value="Asscher">Asscher</option>
-                          <option value="Cushion">Cushion</option>
-                          <option value="Emerald">Emerald</option>
-                          <option value="Heart">Heart</option>
-                          <option value="Marquise">Marquise</option>
-                          <option value="Oval">Oval</option>
+                          <option value="Square Emerald">Square Emerald</option>,
+                          <option value="Tapered Bullet">Tapered Bullet</option>,
+                          <option value="Calf">Calf</option>,
+                          <option value="Briolette">Briolette</option>,
+                          <option value="Bullets">Bullets</option>,
+                          <option value="Cushion Brilliant">Cushion Brilliant</option>,
+                          <option value="Cushion Modified">Cushion Modified</option>,
+                          <option value="European Cut">European Cut</option>,
+                          <option value="Flanders">Flanders</option>,
+                          <option value="Half Moon">Half Moon</option>,
+                          <option value="Hexagonal">Hexagonal</option>,
+                          <option value="Kite">Kite</option>,
+                          <option value="Lozenge">Lozenge</option>,
+                          <option value="Octagonal">Octagonal</option>,
+                          <option value="Old Miner">Old Miner</option>,
+                          <option value="Pentagonal">Pentagonal</option>,
+                          <option value="Square Radiant">Square Radiant</option>,
+                          <option value="Shield">Shield</option>,
+                          <option value="Square">Square</option>,
+                          <option value="Star">Star</option>,
+                          <option value="Trapezoid">Trapezoid</option>,
+                          <option value="Other">Other</option>,
+                          <option value="Polki">Polki</option>,
+                          <option value="Heart">Heart</option>,
+                          <option value="Cushion">Cushion</option>,
+                          <option value="Asscher">Asscher</option>,
+                          <option value="Single Cut">Single Cut</option>,
+                          <option value="Radiant">Radiant</option>,
+                          <option value="Rose">Rose</option>,
+                          <option value="Triangle">Triangle</option>,
+                          <option value="Trilliant">Trilliant</option>,
+                          <option value="Round">Round</option>,
                           <option value="Pears">Pears</option>
-                          <option value="Princess">Princess</option>
-                          <option value="Radiant">Radiant</option>
-                          <option value="Round">Round</option>
+                          <option value="Marquise">Marquise</option>,
+                          <option value="Pear">Pear</option>,
+                          <option value="Princess">Princess</option>,
+                          <option value="Emerald">Emerald</option>,
+                          <option value="Oval">Oval</option>,
+                          <option value="Baguette">Baguette</option>,
+                          <option value="Tabered Baguette">Tabered Baguette</option>
                         </select>
                       </td>
                       <td>
