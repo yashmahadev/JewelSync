@@ -19,6 +19,10 @@ api_version = "2026-07"
   uri = "/webhooks/app/uninstalled"
   topics = [ "app/uninstalled" ]
 
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app_subscriptions/update"
+  topics = [ "app_subscriptions/update" ]
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_locations,write_metaobject_definitions,write_metaobjects,write_products"

@@ -162,5 +162,16 @@ model DynamicDiamondType {
   @@index([shop])
 }
 
+model StoreSubscription {
+  id             Int      @id @default(autoincrement())
+  shop           String   @unique @db.VarChar(255)
+  subscriptionId String   @db.VarChar(255)
+  status         String   @db.VarChar(50)   // e.g. "ACTIVE", "DECLINED", "CANCELLED"
+  planName       String   @db.VarChar(100)  // e.g. "Monthly Subscription"
+  amount         Decimal  @db.Decimal(10, 2)
+  isTest         Boolean  @default(false)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now()) @updatedAt
 
-
+  @@map("store_subscriptions")
+}

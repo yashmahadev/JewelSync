@@ -10,6 +10,7 @@
       }
     },
     "routeIdToServerBundleId": {
+      "routes/webhooks.app_subscriptions.update": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
       "routes/webhooks.app.scopes_update": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
       "routes/webhooks.app.uninstalled": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
       "routes/webhooks.products.update": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
@@ -29,6 +30,15 @@
         "file": "app/root.jsx",
         "path": "",
         "config": {}
+      },
+      "routes/webhooks.app_subscriptions.update": {
+        "id": "routes/webhooks.app_subscriptions.update",
+        "parentId": "root",
+        "file": "app/routes/webhooks.app_subscriptions.update.jsx",
+        "path": "webhooks/app_subscriptions/update",
+        "config": {
+          "runtime": "nodejs"
+        }
       },
       "routes/webhooks.app.scopes_update": {
         "id": "routes/webhooks.app.scopes_update",
@@ -166,6 +176,12 @@
         "file": "root.jsx",
         "path": ""
       },
+      "routes/webhooks.app_subscriptions.update": {
+        "id": "routes/webhooks.app_subscriptions.update",
+        "parentId": "root",
+        "file": "routes/webhooks.app_subscriptions.update.jsx",
+        "path": "webhooks/app_subscriptions/update"
+      },
       "routes/webhooks.app.scopes_update": {
         "id": "routes/webhooks.app.scopes_update",
         "parentId": "root",
@@ -260,6 +276,11 @@
         "path": "",
         "file": "root.jsx",
         "children": [
+          {
+            "id": "routes/webhooks.app_subscriptions.update",
+            "file": "routes/webhooks.app_subscriptions.update.jsx",
+            "path": "webhooks/app_subscriptions/update"
+          },
           {
             "id": "routes/webhooks.app.scopes_update",
             "file": "routes/webhooks.app.scopes_update.jsx",

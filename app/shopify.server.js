@@ -3,6 +3,7 @@ import {
   ApiVersion,
   AppDistribution,
   shopifyApp,
+  BillingInterval,
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
@@ -29,6 +30,10 @@ function getApiVersion() {
 
 const resolvedApiVersion = getApiVersion();
 
+export const MONTHLY_PLAN = process.env.SHOPIFY_BILLING_PLAN_NAME || "Monthly Subscription";
+const billingAmount = parseFloat(process.env.SHOPIFY_BILLING_AMOUNT || "8.99");
+const billingCurrency = process.env.SHOPIFY_BILLING_CURRENCY || "USD";
+
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
@@ -38,6 +43,17 @@ const shopify = shopifyApp({
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,
+  billing: {
+    [MONTHLY_PLAN]: {
+      lineItems: [
+        {
+          amount: billingAmount,
+          currencyCode: billingCurrency,
+          interval: BillingInterval.Every30Days,
+        },
+      ],
+    },
+  },
   future: {
     expiringOfflineAccessTokens: true,
   },
